@@ -1,0 +1,347 @@
+"""
+app.py
+======
+Web version of the QuickBooks Purchase Order tool -- same qbo_client.py /
+glass_pdf_parser.py / cardinal_glass_output.py business logic as the
+desktop app, behind individual logins, reachable by URL.
+
+Run with:
+    python app.py
+(or via a WSGI server like gunicorn/waitress in production -- see README.md)
+
+Requires FLASK_SECRET_KEY to be set in the environment in production so
+login sessions survive a restart; a random one is generated otherwise
+(logs everyone out on every restart, but never insecure-by-default).
+"""
+
+import concurrent.futures
+import os
+import secrets
+import tempfile
+import threading
+import time
+import uuid
+
+from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
+
+import auth
+import cardinal_glass_output
+import glass_pdf_parser
+import qbo_client
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+DOWNLOAD_DIR = os.path.join(APP_DIR, "downloads")
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 12  # 12 hours
+
+TOKEN_LOCK = threading.Lock()  # serialize QBO token refreshes across concurrent users
+
+REFRESH_JOBS = {}
+REFRESH_LOCK = threading.Lock()
+
+
+def err(message, code=400):
+    return jsonify({"error": str(message)}), code
+
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        if auth.verify_login(username, password):
+            session.clear()
+            session["username"] = username
+            session.permanent = True
+            return redirect(request.args.get("next") or url_for("index"))
+        return render_template("login.html", error="Invalid username or password."), 401
+    return render_template("login.html", error=None)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+# ---------------------------------------------------------------------------
+# Pages
+# ---------------------------------------------------------------------------
+@app.route("/")
+@auth.login_required
+def index():
+    return render_template("purchase_order.html", user=auth.current_user())
+
+
+@app.route("/categories")
+@auth.login_required
+def categories_page():
+    return render_template("manage_categories.html", user=auth.current_user())
+
+
+# ---------------------------------------------------------------------------
+# Reference data (vendors/items/accounts/customers) -- cached like the
+# desktop app; refreshing is slow (thousands of records) so it runs as a
+# background job the page polls, instead of blocking the request.
+# ---------------------------------------------------------------------------
+@app.route("/api/reference")
+@auth.login_required
+def api_reference():
+    cache = qbo_client.load_reference_cache()
+    if not cache:
+        return jsonify({"vendors": [], "items": [], "accounts": [], "customers": [], "fetched_at": None})
+    return jsonify(cache)
+
+
+@app.route("/api/reference/refresh", methods=["POST"])
+@auth.login_required
+def api_reference_refresh():
+    job_id = uuid.uuid4().hex
+    with REFRESH_LOCK:
+        REFRESH_JOBS[job_id] = {"status": "running", "error": None}
+
+    def work():
+        try:
+            with TOKEN_LOCK:
+                qbo_client.get_valid_access_token()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                vf = pool.submit(qbo_client.get_vendors)
+                itf = pool.submit(qbo_client.get_items)
+                af = pool.submit(qbo_client.get_accounts)
+                cf = pool.submit(qbo_client.get_customers)
+                vendors, items, accounts, customers = vf.result(), itf.result(), af.result(), cf.result()
+            qbo_client.save_reference_cache(vendors, items, accounts, customers)
+            with REFRESH_LOCK:
+                REFRESH_JOBS[job_id] = {"status": "done", "error": None}
+        except Exception as exc:  # noqa: BLE001
+            with REFRESH_LOCK:
+                REFRESH_JOBS[job_id] = {"status": "error", "error": str(exc)}
+
+    threading.Thread(target=work, daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/api/reference/refresh/<job_id>")
+@auth.login_required
+def api_reference_refresh_status(job_id):
+    with REFRESH_LOCK:
+        job = REFRESH_JOBS.get(job_id)
+    if not job:
+        return err("Unknown job id.", 404)
+    return jsonify(job)
+
+
+# ---------------------------------------------------------------------------
+# Categories
+# ---------------------------------------------------------------------------
+@app.route("/api/categories")
+@auth.login_required
+def api_categories():
+    return jsonify(qbo_client.load_categories())
+
+
+@app.route("/api/categories/qbo")
+@auth.login_required
+def api_categories_qbo():
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        return jsonify(qbo_client.get_item_categories())
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+
+
+@app.route("/api/accounts")
+@auth.login_required
+def api_accounts():
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        return jsonify(qbo_client.get_accounts())
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+
+
+@app.route("/api/categories", methods=["POST"])
+@auth.login_required
+def api_categories_save():
+    data = request.get_json(force=True)
+    name = (data.get("name") or "").strip()
+    income = data.get("income_account") or {}
+    expense = data.get("expense_account") or {}
+    if not name or not income.get("id") or not expense.get("id"):
+        return err("name, income_account, and expense_account are required.")
+    qbo_client.set_category(name, income["id"], income.get("name", ""), expense["id"], expense.get("name", ""))
+    return jsonify(qbo_client.load_categories())
+
+
+@app.route("/api/categories/<name>", methods=["DELETE"])
+@auth.login_required
+def api_categories_delete(name):
+    qbo_client.delete_category(name)
+    return jsonify(qbo_client.load_categories())
+
+
+# ---------------------------------------------------------------------------
+# Items
+# ---------------------------------------------------------------------------
+@app.route("/api/items", methods=["POST"])
+@auth.login_required
+def api_items_create():
+    data = request.get_json(force=True)
+    name = (data.get("name") or "").strip()
+    category = (data.get("category") or "").strip()
+    categories = qbo_client.load_categories()
+    if not name:
+        return err("Name is required.")
+    if category not in categories:
+        return err("Choose a valid, mapped category.")
+    try:
+        price = float(data.get("price") or 0)
+    except (TypeError, ValueError):
+        return err("Price must be a number.")
+
+    mapping = categories[category]
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        created = qbo_client.create_item(
+            name=name, description=(data.get("description") or "").strip(), price=price,
+            income_account_id=mapping["income_account"]["id"],
+            expense_account_id=mapping["expense_account"]["id"],
+        )
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+
+    item = {
+        "id": created["id"], "name": created["name"], "description": (data.get("description") or "").strip(),
+        "unit_price": price, "purchase_cost": price, "type": "NonInventory",
+    }
+    cache = qbo_client.load_reference_cache() or {"vendors": [], "items": [], "accounts": [], "customers": [], "fetched_at": time.time()}
+    cache["items"].append(item)
+    qbo_client.save_reference_cache(cache["vendors"], cache["items"], cache["accounts"], cache["customers"])
+    return jsonify(item)
+
+
+# ---------------------------------------------------------------------------
+# Purchase orders
+# ---------------------------------------------------------------------------
+@app.route("/api/po-number/suggest")
+@auth.login_required
+def api_po_number_suggest():
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        return jsonify({"next": qbo_client.suggest_next_po_number()})
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+
+
+@app.route("/api/purchase-order", methods=["POST"])
+@auth.login_required
+def api_purchase_order_create():
+    data = request.get_json(force=True)
+    vendor_id = data.get("vendor_id")
+    item_lines = data.get("item_lines") or []
+    category_lines = data.get("category_lines") or []
+    if not vendor_id:
+        return err("vendor_id is required.")
+    if not item_lines and not category_lines:
+        return err("Add at least one line item or category line.")
+
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        result = qbo_client.create_purchase_order(
+            vendor_id=vendor_id, item_lines=item_lines, category_lines=category_lines,
+            memo=data.get("memo") or None, txn_date=data.get("txn_date") or None,
+            q_project=data.get("q_project") or None, doc_number=data.get("doc_number") or None,
+        )
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# Glass PDF import -> Cardinal CSV
+# ---------------------------------------------------------------------------
+@app.route("/api/glass-pdf", methods=["POST"])
+@auth.login_required
+def api_glass_pdf_parse():
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return err("No file uploaded.")
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        file.save(tmp.name)
+        tmp_path = tmp.name
+    try:
+        parsed = glass_pdf_parser.parse_glass_pdf(tmp_path)
+    except ValueError as exc:
+        return err(exc)
+    finally:
+        os.unlink(tmp_path)
+    return jsonify(parsed)
+
+
+@app.route("/api/cardinal-csv", methods=["POST"])
+@auth.login_required
+def api_cardinal_csv():
+    data = request.get_json(force=True)
+    units = data.get("units") or []
+    po_number = (data.get("po_number") or "").strip()
+    job_number = data.get("job_number")
+    if not po_number:
+        return err("po_number is required.")
+    if not units:
+        return err("No units provided.")
+
+    line_items, skipped, spacer_types_seen = [], [], []
+    for unit in units:
+        item, flags = cardinal_glass_output.line_item_from_parsed_unit(unit)
+        if item is None:
+            skipped.append({"unit": unit.get("unit"), "reasons": flags})
+            continue
+        line_items.append(item)
+        spacer_types_seen.append(getattr(item, "spc_type_parsed", None))
+
+    if not line_items:
+        return jsonify({"error": "None of the units could be turned into a Cardinal line item.", "skipped": skipped}), 400
+
+    spacer_type = next((s for s in spacer_types_seen if s), "BLACK SS")
+    mismatched = [li.unit_number for li, s in zip(line_items, spacer_types_seen) if s and s != spacer_type]
+
+    import warnings
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        batch = cardinal_glass_output.Batch(
+            po_number=po_number, job_number=job_number, items=line_items, spacer_type=spacer_type,
+        )
+        path = cardinal_glass_output.generate_batch_csv(batch, output_dir=DOWNLOAD_DIR)
+
+    return jsonify({
+        "download_url": url_for("download_file", name=os.path.basename(path)),
+        "count": len(line_items),
+        "skipped": skipped,
+        "mismatched_spacer": mismatched,
+        "warnings": [str(w.message) for w in caught],
+    })
+
+
+@app.route("/downloads/<name>")
+@auth.login_required
+def download_file(name):
+    path = os.path.join(DOWNLOAD_DIR, name)
+    if not os.path.abspath(path).startswith(os.path.abspath(DOWNLOAD_DIR)) or not os.path.exists(path):
+        return err("Not found.", 404)
+    return send_file(path, as_attachment=True, download_name=name)
+
+
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=5050, debug=False)

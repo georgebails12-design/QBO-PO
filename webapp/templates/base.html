@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Purchase Orders{% endblock %} - Panda Windows &amp; Doors</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+{% block head %}{% endblock %}
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a href="{{ url_for('index') }}" class="brand">
+      <img src="{{ url_for('static', filename='panda_logo.png') }}" alt="Panda Windows &amp; Doors" class="brand-logo"
+           onerror="this.style.display='none'; document.getElementById('brand-word').style.display='inline';">
+      <span id="brand-word" class="brand-word" style="display:none;">Panda Windows &amp; Doors</span>
+    </a>
+    <nav class="topnav">
+      <a href="{{ url_for('index') }}">Purchase Order</a>
+      <a href="{{ url_for('categories_page') }}">Categories</a>
+    </nav>
+    {% if user %}
+    <div class="topbar-user">
+      <span>{{ user.name }}</span>
+      <a href="{{ url_for('logout') }}">Log out</a>
+    </div>
+    {% endif %}
+  </div>
+</header>
+<main class="page">
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

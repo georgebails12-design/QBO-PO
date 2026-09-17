@@ -1,0 +1,13 @@
+# QuickBooks credentials/tokens/cache -- never commit these
+qbo_config.json
+qbo_tokens.json
+qbo_reference_cache.json
+
+# Local login accounts -- never commit real credentials
+users.json
+
+# Generated Cardinal order CSVs
+downloads/
+
+__pycache__/
+*.pyc

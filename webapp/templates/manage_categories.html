@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Manage Categories{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-title-row">
+    <h2>Manage Categories</h2>
+    <button type="button" id="refresh-categories" class="btn-secondary">Refresh from QuickBooks</button>
+  </div>
+  <p class="hint">Loaded from QuickBooks' own Product/Service Categories. Map each one to the accounts new items
+    in it should post to -- unmapped categories are hidden when creating a new item.</p>
+  <table class="grid" id="categories-table">
+    <thead><tr><th>Category</th><th>Purchasing account</th><th>Sales account</th><th></th></tr></thead>
+    <tbody id="categories-table-body"></tbody>
+  </table>
+</div>
+
+<dialog id="map-category-dialog">
+  <div class="dialog-inner">
+    <h2 id="map-category-title">Map Category</h2>
+    <label>Purchasing account
+      <select id="map-expense"></select>
+    </label>
+    <label>Sales account
+      <select id="map-income"></select>
+    </label>
+    <p class="error" id="map-error" style="display:none;"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn-secondary" id="map-cancel">Cancel</button>
+      <button type="button" class="btn-primary" id="map-save">Save</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="{{ url_for('static', filename='categories.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}New Purchase Order{% endblock %}
+{% block content %}
+<div class="card header-card">
+  <div class="field-row">
+    <label class="field">
+      <span>Vendor</span>
+      <div class="typeahead" data-typeahead="vendor">
+        <input type="text" id="vendor-input" autocomplete="off" placeholder="Start typing a vendor...">
+        <div class="suggestions" id="vendor-suggestions"></div>
+      </div>
+    </label>
+    <label class="field small">
+      <span>PO Date</span>
+      <input type="date" id="po-date">
+    </label>
+    <label class="field small">
+      <span>PO #</span>
+      <div class="po-number-row">
+        <input type="text" id="po-number">
+        <button type="button" id="suggest-po-number" class="btn-secondary">Suggest</button>
+      </div>
+    </label>
+  </div>
+  <div class="field-row">
+    <label class="field wide">
+      <span>Memo</span>
+      <input type="text" id="memo">
+    </label>
+  </div>
+  <div class="field-row">
+    <label class="field">
+      <span>Customer/Project</span>
+      <div class="typeahead" data-typeahead="header-customer">
+        <input type="text" id="header-customer-input" autocomplete="off" placeholder="Start typing...">
+        <div class="suggestions" id="header-customer-suggestions"></div>
+      </div>
+    </label>
+    <button type="button" id="apply-customer-all" class="btn-secondary">Apply to All Lines</button>
+    <label class="field">
+      <span>Q#/Project</span>
+      <input type="text" id="q-project">
+    </label>
+  </div>
+  <p class="status-line" id="reference-status">Loading vendors, items, accounts, and customers...</p>
+</div>
+
+<div class="card">
+  <div class="card-title-row">
+    <h2>Category Details</h2>
+    <span class="hint">Posts straight to an account -- no product/service item needed.</span>
+  </div>
+  <table class="grid" id="category-grid">
+    <thead>
+      <tr><th>Category</th><th>Description</th><th>Amount</th><th>Customer/Project</th><th></th></tr>
+    </thead>
+    <tbody id="category-grid-body"></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-title-row">
+    <h2>Item Details</h2>
+    <div class="card-title-actions">
+      <button type="button" id="new-item-btn" class="btn-secondary">New Item...</button>
+      <button type="button" id="import-glass-btn" class="btn-secondary">Import Glass PDF...</button>
+    </div>
+  </div>
+  <table class="grid" id="item-grid">
+    <thead>
+      <tr><th>Item</th><th>Description</th><th>Qty</th><th>Rate</th><th>Amount</th><th>Customer/Project</th><th></th></tr>
+    </thead>
+    <tbody id="item-grid-body"></tbody>
+  </table>
+</div>
+
+<div class="footer-bar">
+  <div id="total-display" class="total">Total: $0.00</div>
+  <button type="button" id="submit-po" class="btn-primary">Create Purchase Order in QuickBooks</button>
+</div>
+
+<!-- New Item dialog -->
+<dialog id="new-item-dialog">
+  <form method="dialog" id="new-item-form">
+    <h2>New Item</h2>
+    <label>Name <input type="text" id="ni-name" required></label>
+    <label>Description <input type="text" id="ni-description"></label>
+    <label>Price <input type="number" step="0.01" id="ni-price" value="0.00"></label>
+    <label>Category
+      <select id="ni-category"></select>
+    </label>
+    <label>Qty for this PO <input type="number" step="0.01" id="ni-qty" value="1"></label>
+    <p class="error" id="ni-error" style="display:none;"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn-secondary" id="ni-cancel">Cancel</button>
+      <button type="button" class="btn-primary" id="ni-create">Create in QuickBooks</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Import Glass PDF dialog -->
+<dialog id="glass-dialog">
+  <div class="glass-dialog-inner">
+    <h2>Import Glass PDF</h2>
+    <div id="glass-upload-step">
+      <input type="file" id="glass-file-input" accept="application/pdf">
+      <button type="button" class="btn-primary" id="glass-parse-btn">Parse PDF</button>
+      <p class="error" id="glass-error" style="display:none;"></p>
+    </div>
+    <div id="glass-review-step" style="display:none;">
+      <p id="glass-summary"></p>
+      <label>Category for all items:
+        <select id="glass-category"></select>
+      </label>
+      <table class="grid" id="glass-grid">
+        <thead><tr><th></th><th>Item Name</th><th>Description</th><th>Qty</th><th>Price</th><th>Notes</th></tr></thead>
+        <tbody id="glass-grid-body"></tbody>
+      </table>
+      <p class="status-line" id="glass-status"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn-secondary" id="glass-cancel">Close</button>
+        <button type="button" class="btn-secondary" id="glass-cardinal-csv">Generate Cardinal CSV...</button>
+        <button type="button" class="btn-primary" id="glass-create-items">Create Items &amp; Add to PO</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% endblock %}

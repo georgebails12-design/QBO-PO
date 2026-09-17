@@ -1,0 +1,82 @@
+{
+  "Alum - Small Items": {
+    "income_account": {
+      "id": "1150040013",
+      "name": "COGS Aluminum"
+    },
+    "expense_account": {
+      "id": "1114",
+      "name": "Raw Material - Aluminum"
+    }
+  },
+  "Aluminum": {
+    "income_account": {
+      "id": "1150040013",
+      "name": "COGS Aluminum"
+    },
+    "expense_account": {
+      "id": "1114",
+      "name": "Raw Material - Aluminum"
+    }
+  },
+  "FINISH": {
+    "income_account": {
+      "id": "1150040018",
+      "name": "COGS Coating & Bending"
+    },
+    "expense_account": {
+      "id": "1103",
+      "name": "Capitalized Freight and Coating Expenses"
+    }
+  },
+  "Glass": {
+    "income_account": {
+      "id": "1150040014",
+      "name": "COGS Glass"
+    },
+    "expense_account": {
+      "id": "1112",
+      "name": "Raw Materials - Glass"
+    }
+  },
+  "Hardware small parts": {
+    "income_account": {
+      "id": "1150040015",
+      "name": "COGS Hardware"
+    },
+    "expense_account": {
+      "id": "1111",
+      "name": "Raw Materials - Hardware"
+    }
+  },
+  "Powder Coating": {
+    "income_account": {
+      "id": "1150040016",
+      "name": "COGS Powder Coat"
+    },
+    "expense_account": {
+      "id": "1113",
+      "name": "Raw Materials - Powder Coat"
+    }
+  },
+  "Shop Supplies": {
+    "income_account": {
+      "id": "873",
+      "name": "Shop Supplies"
+    },
+    "expense_account": {
+      "id": "1150040019",
+      "name": "Raw Materials - Shop Supplies"
+    }
+  },
+  "Special Hardware": {
+    "income_account": {
+      "id": "1150040015",
+      "name": "COGS Hardware"
+    },
+    "expense_account": {
+      "id": "1111",
+      "name": "Raw Materials - Hardware"
+    }
+  }
+}

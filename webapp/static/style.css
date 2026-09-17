@@ -1,0 +1,131 @@
+:root {
+  --accent: #1f6f5c;
+  --accent-dark: #16503f;
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --border: #dde1e6;
+  --text: #1c2024;
+  --text-muted: #667085;
+  --danger: #b3432f;
+  --danger-bg: #fbeae6;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.topbar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.topbar-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.brand { display: flex; align-items: center; text-decoration: none; color: var(--text); }
+.brand-logo { height: 36px; }
+.brand-word { font-weight: 700; font-size: 18px; }
+.topnav { display: flex; gap: 16px; flex: 1; }
+.topnav a { color: var(--text-muted); text-decoration: none; font-size: 14px; font-weight: 600; }
+.topnav a:hover { color: var(--accent); }
+.topbar-user { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--text-muted); }
+.topbar-user a { color: var(--accent); text-decoration: none; }
+
+.page { max-width: 1100px; margin: 0 auto; padding: 20px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 18px;
+}
+.card-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.card-title-row h2 { margin: 0; font-size: 15px; }
+.card-title-actions { display: flex; gap: 8px; }
+.hint { color: var(--text-muted); font-size: 12.5px; }
+
+.field-row { display: flex; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-muted); font-weight: 600; flex: 1; min-width: 200px; }
+.field.small { flex: 0 0 140px; min-width: 120px; }
+.field.wide { flex: 2; min-width: 320px; }
+.field input, .field select {
+  font-size: 14px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+  font-weight: 400;
+}
+.po-number-row { display: flex; gap: 6px; }
+.po-number-row input { flex: 1; }
+
+.typeahead { position: relative; }
+.typeahead input { width: 100%; }
+.suggestions {
+  display: none;
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  max-height: 220px; overflow-y: auto; box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+}
+.suggestions.open { display: block; }
+.suggestions .suggestion { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-weight: 400; }
+.suggestions .suggestion:hover, .suggestions .suggestion.active { background: #eef6f3; }
+
+.status-line { font-size: 12.5px; color: var(--text-muted); margin: 6px 0 0; }
+
+table.grid { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.grid th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); padding: 6px 6px; border-bottom: 1px solid var(--border); }
+table.grid td { padding: 5px 6px; vertical-align: top; }
+table.grid input, table.grid select { width: 100%; font-size: 13.5px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 5px; }
+table.grid .amount-cell { text-align: right; font-variant-numeric: tabular-nums; padding-top: 10px; }
+.row-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; padding: 4px 8px; }
+.row-remove:hover { color: var(--danger); }
+
+button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid transparent; padding: 8px 14px; }
+.btn-primary { background: var(--accent); color: #fff; font-weight: 600; }
+.btn-primary:hover { background: var(--accent-dark); }
+.btn-secondary { background: var(--surface); border-color: var(--border); color: var(--text); font-weight: 600; }
+.btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+.footer-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 4px; }
+.total { font-weight: 700; font-size: 16px; }
+
+dialog { border: none; border-radius: 10px; padding: 0; max-width: 480px; width: 92vw; }
+dialog::backdrop { background: rgba(20,24,29,0.45); }
+dialog h2 { margin: 0 0 12px; font-size: 16px; }
+#new-item-form, .dialog-inner { padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+#new-item-form label, .dialog-inner label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-muted); font-weight: 600; }
+#new-item-form input, #new-item-form select, .dialog-inner select, .dialog-inner input {
+  font-size: 14px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-weight: 400; color: var(--text);
+}
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
+#glass-dialog { max-width: 900px; }
+.glass-dialog-inner { padding: 20px; max-height: 82vh; overflow-y: auto; }
+#glass-grid td input { width: 100%; }
+
+.error { color: var(--danger); background: var(--danger-bg); padding: 8px 10px; border-radius: 6px; font-size: 13px; }
+
+.login-body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--bg); }
+.login-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 32px;
+  width: 320px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 12px 30px rgba(0,0,0,0.06);
+}
+.login-logo { height: 48px; align-self: center; }
+.login-word { align-self: center; font-weight: 700; font-size: 18px; }
+.login-card h1 { margin: 0; font-size: 17px; text-align: center; }
+.login-card label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-muted); font-weight: 600; }
+.login-card input { font-size: 14px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 6px; }
+
+@media (max-width: 640px) {
+  .field-row { flex-direction: column; }
+  .field, .field.small, .field.wide { flex: 1 1 auto; min-width: 0; }
+}

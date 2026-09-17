@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in - Purchase Orders</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="login-body">
+<form class="login-card" method="post">
+  <img src="{{ url_for('static', filename='panda_logo.png') }}" alt="Panda Windows &amp; Doors" class="login-logo"
+       onerror="this.style.display='none'; document.getElementById('login-word').style.display='block';">
+  <div id="login-word" class="login-word" style="display:none;">Panda Windows &amp; Doors</div>
+  <h1>Purchase Orders</h1>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <label>Username
+    <input type="text" name="username" autocomplete="username" autofocus required>
+  </label>
+  <label>Password
+    <input type="password" name="password" autocomplete="current-password" required>
+  </label>
+  <button type="submit">Sign in</button>
+</form>
+</body>
+</html>
