@@ -1,0 +1,66 @@
+{
+  "_readme": [
+    "Field mapping between CenterPoint (the 'PandaWindowsTest CenterPoint' quoting/configurator XML export) and the corresponding QuickBooks Online Sales Estimate.",
+    "Built by comparing Quote_4086_export.xml (CenterPoint quote #4086, 'QQ#92437 Patel Entry Door') against QBO estimate 11172, and Quote_2447_export.xml (CenterPoint quote #2447, 'QQ#91176 McDonald Audi') against QBO estimate 11152.",
+    "The CenterPoint quote number (userquotenumber, e.g. 4086) is NOT the same as the 'Q#' in the quote/project name (e.g. QQ#92437) — that QQ# is what lands in QBO's 'Customer PO'/'Q Number/PO #' custom field.",
+    "XML root element is <quote>; 'Value' attributes hold most scalar field values (e.g. <ponumber Value=\"\" />); a few fields are plain element text (e.g. <userquotenumber>4086</userquotenumber>). Several fields (quoteheader, Billing, Shipping, clientinfo, projectowner, notes, projectinfo) are escaped nested XML strings that must be re-parsed."
+  ],
+
+  "header_field_mapping": [
+    {"centerpoint_path": "quotename / projectname", "qbo_field": "(none direct)", "note": "Format is 'QQ#<Q-number> <ProjectName>'. Split on first space after the QQ# token to recover the Q# and the project name separately."},
+    {"centerpoint_path": "quotename Q# token (e.g. QQ#92437)", "qbo_field": "custom_fields: 'Q Number/PO #' / 'Customer PO' (def. 1000000033)", "note": "Exact match confirmed: 92437 <-> estimate 11172; 91176 <-> estimate 11152."},
+    {"centerpoint_path": "quotename project-name remainder (e.g. 'Patel Entry Door')", "qbo_field": "contact.display_name project half (after the ':')", "note": "Exact match: 'Patel Entry Door', 'McDonald Audi'."},
+    {"centerpoint_path": "userquotenumber", "qbo_field": "(none — internal CenterPoint quote id only)", "note": "4086 and 2447 respectively; not present anywhere in the QBO estimate."},
+    {"centerpoint_path": "clientintegrationid (root) / Billing.IntegrationID", "qbo_field": "custom_fields: 'Dealer' (def. 1000000020) + contact info", "note": "Format is '<Dealer Company> - <Contact Person>'. Company half is a loose match to the QBO Dealer picklist value ('Integrated Door & Window' ~ 'Integrated Door and Window Systems, Inc.'; 'Ken Caryl Glass, Inc.' ~ 'Ken Caryl Glass Inc'). Needs a lookup table, not a direct string match, to resolve to the exact QBO picklist option."},
+    {"centerpoint_path": "Billing.AddressInfo.Email / Shipping.Email", "qbo_field": "contact.email", "note": "Case-insensitive exact match ('brit@idws.us' <-> 'Brit@idws.us')."},
+    {"centerpoint_path": "block (root) == quoteheader.Configurable02", "qbo_field": "custom_fields: 'Residential or Commercial' (def. 1000000019)", "note": "Near-exact match, punctuation differs: CenterPoint 'Residential - Single Family' vs QBO 'Residential -Single Family' (no space before Single)."},
+    {"centerpoint_path": "quoteheader.Configurable07", "qbo_field": "custom_fields: 'RSM' (def. 1000000027)", "note": "CenterPoint stores the full name ('Sean Torre', 'Efrain Zarate'); QBO's RSM picklist stores first name only ('Sean', 'Efrain'). Confirmed match on both examples."},
+    {"centerpoint_path": "quoteheader.Configurable27", "qbo_field": "custom_fields: 'Deposit Due' (def. 1000000023)", "note": "Configurable27 is a deposit SCHEDULE ('50/50'), not a dollar amount. QBO's Deposit Due dollar value is exactly 50% of the estimate total on both examples, consistent with a 50/50 schedule. Compute Deposit Due as total * (first number in the schedule / 100)."},
+    {"centerpoint_path": "quoteheader.Configurable17", "qbo_field": "line item: 'Z Fees:Crating' amount", "note": "EXACT match on both examples ($480.00 and $1,080.00) — this fee passes through 1:1, no markup."},
+    {"centerpoint_path": "quoteheader.Configurable11", "qbo_field": "(descriptive only)", "note": "'Standard Crating' — categorical label behind the Configurable17 crating charge."},
+    {"centerpoint_path": "quoteheader.Configurable15", "qbo_field": "line item: 'Z Fees:Shipping Fee' amount", "note": "Approximate only. McDonald Audi: 2,483.14 vs QBO 2,484.94 (~$1.80 off — likely a freight re-quote between export and estimate). Patel: 1,320.00 vs QBO 1,765.00 (~$445 / 34% off — larger gap, needs investigation; possibly a shipping method or zone change between quote and final estimate)."},
+    {"centerpoint_path": "quoteheader.Configurable03 == model (root)", "qbo_field": "(none — always 'Shipping' in both samples)", "note": "Delivery method flag; not one of the tracked QBO custom fields."},
+    {"centerpoint_path": "quoteheader.Configurable09", "qbo_field": "(no confirmed QBO field)", "note": "'Homeowner' / 'Glazing Company' — reads like an end-customer type classification. No corresponding QBO custom field identified yet."},
+    {"centerpoint_path": "quoteheader.Configurable08", "qbo_field": "(no confirmed QBO field)", "note": "'West - Residential' / 'Southwest' — reads like a sales territory/region. No corresponding QBO custom field identified yet."},
+    {"centerpoint_path": "quoteheader.Configurable04", "qbo_field": "(unclear)", "note": "'Other' (Patel) / 'Dealer/Partner' (McDonald) — inconsistent with which quotes actually have a Dealer set in QBO (both do), so this is NOT a reliable Dealer-vs-direct flag. Needs clarification from whoever configured CenterPoint."},
+    {"centerpoint_path": "TotalCustomerPrice / TotalDealerPrice / TotalTwoStepPrice (all equal in samples)", "qbo_field": "(feeds into) estimate total, pre-markup", "note": "See price_reconciliation below — this is Panda's price to the dealer, NOT the estimate total billed in QBO."}
+  ],
+
+  "line_item_field_mapping": [
+    {"centerpoint_path": "lineitemmasters/lineitemmaster/lineitems/lineitem/description", "qbo_field": "line description", "note": "CenterPoint stores the full configuration spec (material, design, dimensions, hardware, etc. as multi-line text). QBO's line description is a short human summary ('Voyage Collection Pivot Door'). The QBO description looks hand-written/summarized from the CenterPoint spec, not auto-generated."},
+    {"centerpoint_path": "lineitemmasters/lineitemmaster/lineitems/lineitem/customerextendedprice", "qbo_field": "line amount (rate)", "note": "See price_reconciliation — QBO's line rate = CenterPoint customerextendedprice + dealer markup. Markup % is NOT constant across dealers (see below), so it must be looked up per-dealer, not assumed."},
+    {"centerpoint_path": "lineitemmasters/lineitemmaster/quantity", "qbo_field": "line quantity", "note": "Exact match (qty 2 for McDonald Audi's FTS.60)."},
+    {"centerpoint_path": "lineitemmasters/lineitemmaster (parent 'master' record)", "qbo_field": "(splits into multiple QBO lines)", "note": "One CenterPoint lineitemmaster (e.g. a pivot door unit with 2 sidelites) can correspond to MULTIPLE QBO estimate lines: one priced line for the main configuration plus $0.00 placeholder lines for included sub-components (sidelites). Confirmed on estimate 11172 (Voyage Collection Pivot Door $23,671.61 + 2x Sidelite lines at $0.00, all from a single CenterPoint lineitemmaster)."}
+  ],
+
+  "price_reconciliation": {
+    "note": "CenterPoint's exported price is Panda's price TO THE DEALER (list = dealer = two-step = customer price in the export, all equal, no markup applied). The QBO estimate bills the dealer's own end customer, which includes the dealer's markup on top. Fees (crating) pass through unmarked-up; the door/window unit price does not.",
+    "examples": [
+      {
+        "estimate": "11172",
+        "quote_file": "Quote_4086_export.xml",
+        "dealer": "Integrated Door and Window Systems, Inc.",
+        "centerpoint_customer_price": 18047.10,
+        "qbo_line_amount": 23671.61,
+        "markup_amount": 5624.51,
+        "markup_pct": 31.17
+      },
+      {
+        "estimate": "11152",
+        "quote_file": "Quote_2447_export.xml",
+        "dealer": "Ken Caryl Glass Inc",
+        "centerpoint_customer_price": 25736.70,
+        "qbo_line_amount": 31819.92,
+        "markup_amount": 6083.22,
+        "markup_pct": 23.64
+      }
+    ],
+    "conclusion": "Markup % differs by dealer (31.17% vs 23.64%) — there is no single constant markup factor to hardcode. Any automated CenterPoint -> QBO mapping needs a per-dealer markup table (likely already maintained somewhere in CenterPoint's client/pricing records, since 'MarkupPctSetByConfigurator' and 'dealermarkuppct' were 0 in these exports — the markup is applied OUTSIDE this XML, at estimate-creation time)."
+  },
+
+  "open_questions": [
+    "Where does the per-dealer markup % actually live (CenterPoint client record, a separate pricing sheet, or manual entry when building the QBO estimate)?",
+    "Configurable08/Configurable09/Configurable04 have no confirmed QBO counterpart — confirm with whoever set up the CenterPoint Configurable field labels what they represent.",
+    "The Configurable15 (freight) vs QBO Shipping Fee gap was large for estimate 11172 ($445) but small for 11152 ($1.80) — worth checking whether the Patel Entry Door shipping was manually adjusted in QBO after the CenterPoint quote was exported."
+  ]
+}
