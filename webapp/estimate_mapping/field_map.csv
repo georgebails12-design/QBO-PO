@@ -1,0 +1,25 @@
+Field Label,Category,JSON Path,Custom Field Def. ID,Type,11180,11172,11152
+Estimate Doc #,Standard,reference_number,,string,11180,11172,11152
+Internal Estimate ID,Standard,id,,string (QBO GUID),…484773,…484576,…483987
+Customer:Project,Standard,contact.display_name,,string,JDP Associates:Aldo Residence Add On,Integrated Door & Window Systems:Patel Entry Door,Ken Caryl Glass:McDonald Audi
+Customer/Project ID,Standard,contact.id,,string (QBO GUID),…30805,…30802,…30779
+Customer Email,Standard,contact.email,,string,Joey@adc.vegas,Brit@idws.us,chad@kcglassinc.com
+Estimate Date,Standard,txn_date,,date (YYYY-MM-DD),2026-09-17,2026-09-14,2026-09-04
+Total Amount,Standard,amount,,currency,31856.68,25916.61,35384.86
+Balance,Standard,balance_amount,,currency,0,0,0
+Accept Status,Standard,accept_status.status,,enum (PENDING/ACCEPTED/REJECTED/CLOSED),ACCEPTED,ACCEPTED,ACCEPTED
+Accepted Date,Standard,accept_status.accepted_date,,date,2026-09-17,2026-09-15,
+Expiration Date,Standard,expiration_date,,date,,,
+QBO Link,Standard,link,,URL,qbo.intuit.com/…txnId=484773,…txnId=484576,…txnId=483987
+Line Items,Standard,lines[],,array — see 'Line Items' sheet,4 lines,5 lines,4 lines
+Residential or Commercial,Custom,custom_fields[].value,1000000019,picklist,Residential -Single Family,Residential -Single Family,Showroom
+Dealer,Custom,custom_fields[].value,1000000020,picklist,NO,"Integrated Door and Window Systems, Inc.",Ken Caryl Glass Inc
+Outside Sales Rep,Custom,custom_fields[].value,1000000022,picklist,NO,NO,NO
+Deposit Due,Custom,custom_fields[].value,1000000023,currency (text),"$15,928.34","$12,958.31","$17,692.43"
+RSM,Custom,custom_fields[].value,1000000027,picklist,Trever,Sean,Efrain
+2nd RSM,Custom,custom_fields[].value,1000000028,picklist,Efrain,,
+Q#/Project,Custom,custom_fields[].value,1000000029,text,95238,,
+Customer PO,Custom,custom_fields[].value,1000000033,text,95238,92437,91176
+JDM Folder,Custom,custom_fields[].value,1000000030,text,,,
+Sales Tax Exempt,Custom,custom_fields[].value,1000000034,text,,,
+Lead Source,Custom,custom_fields[].value,1000001086,text,,,

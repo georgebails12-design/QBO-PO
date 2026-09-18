@@ -1,0 +1,17 @@
+Estimate,Line #,Item ID,Item (Category:Name),Description,Qty,Rate,Amount,Taxable
+11180,1,1815,PandaSelect Lift & Slides:LTS.30,All Aluminum Thermally Broken Panda Select Lift & Slide,1,9028.66,9028.66,TRUE
+11180,2,1971,Screens:Sliding Screen,,1,1744,1744,TRUE
+11180,3,1926,Hinged Doors:FDTS.64,All Aluminum Thermally Broken Slim Profile Hinged Door,2,10266.11,20532.22,TRUE
+11180,4,1571,Z Fees:Soft Wrap,Soft Wrap Fee,1,551.8,551.8,TRUE
+11172,1,1756,Voyage Collection:Voyage Col,Voyage Collection Pivot Door,1,23671.61,23671.61,TRUE
+11172,2,1755,Voyage Collection:Voyage Col Sidelite,Voyage Collection Pivot Door with Sidelite/Transom,1,0,0,TRUE
+11172,3,1755,Voyage Collection:Voyage Col Sidelite,Voyage Collection Pivot Door with Sidelite/Transom,1,0,0,TRUE
+11172,4,1558,Z Fees:Crating,Crating Fee,1,480,480,TRUE
+11172,5,1130,Z Fees:Shipping Fee,Shipping fee,1,1765,1765,FALSE
+11152,1,1791,Folding Door System:FTS.60,Folding Doors 60 - All Aluminum Thermally Broken (FTS.60),2,15909.96,31819.92,TRUE
+11152,2,1558,Z Fees:Crating,Crating Fee,1,1080,1080,TRUE
+11152,3,1130,Z Fees:Shipping Fee,Shipping fee,1,2484.94,2484.94,FALSE
+11152,4,1618,Z Fees:Deposit,Deposit for Sales Order,1,0,0,TRUE
+11180 total,,,,,,,31856.68,
+11172 total,,,,,,,25916.61,
+11152 total,,,,,,,35384.86,
