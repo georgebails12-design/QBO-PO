@@ -1,0 +1,169 @@
+{
+  "_readme": [
+    "Reference template for creating new Sales Estimates in QuickBooks Online, built from estimates 11180, 11172, and 11152.",
+    "IMPORTANT: the qbo_sales_create_estimate / qbo_sales_update_estimate tools do NOT expose a custom_fields parameter.",
+    "Custom fields (Residential or Commercial, Dealer, RSM, Deposit Due, Q#/Project, Customer PO, etc.) must be set manually in the QBO estimate form after creation, or via a direct QBO API call / n8n workflow that PATCHes the SalesTransaction with a CustomField array.",
+    "Looking up an estimate by doc_numbers (e.g. '11180') returns a TRIMMED custom_fields list. Looking it up by its internal estimate_id returns the FULL list. Always use estimate_id when you need every custom field."
+  ],
+
+  "customer_project_convention": {
+    "pattern": "Parent Customer:Project (sub-customer)",
+    "note": "The 'contact.display_name' on the estimate is 'Customer:Project'. The Customer is the parent QBO customer record; the Project is a sub-customer/job under it. When creating a new estimate, resolve the Project's QBO customer_id (not the parent's) via search_customer and pass that as customer_data.customer_id.",
+    "examples": [
+      { "estimate": "11180", "customer": "JDP Associates", "project": "Aldo Residence Add On", "display_name": "JDP Associates:Aldo Residence Add On" },
+      { "estimate": "11172", "customer": "Integrated Door & Window Systems", "project": "Patel Entry Door", "display_name": "Integrated Door & Window Systems:Patel Entry Door" },
+      { "estimate": "11152", "customer": "Ken Caryl Glass", "project": "McDonald Audi", "display_name": "Ken Caryl Glass:McDonald Audi" }
+    ]
+  },
+
+  "custom_fields": [
+    {
+      "title": "Residential or Commercial",
+      "definition_id": "1000000019",
+      "type": "picklist",
+      "sample_allowed_values": [
+        "Residential -Single Family", "Multi-Family", "Hotel / Resort", "Country Clubs / Private Clubs",
+        "Museums / Art Galleries", "Bar / Restaurants", "Educational Facility", "Sports / Entertainment Venues",
+        "Office Building", "Religious Facility", "Retail", "Showroom", "Goverment"
+      ]
+    },
+    {
+      "title": "Dealer",
+      "definition_id": "1000000020",
+      "type": "picklist",
+      "note": "Large picklist (~90+ dealers, incl. deleted/legacy entries). Pick from the QBO dropdown rather than duplicating the full list here; use 'NO' when there is no dealer."
+    },
+    {
+      "title": "Outside Sales Rep",
+      "definition_id": "1000000022",
+      "type": "picklist",
+      "note": "Use 'NO' when there is no outside sales rep involved."
+    },
+    {
+      "title": "Deposit Due",
+      "definition_id": "1000000023",
+      "type": "currency (free text, formatted like \"$15,928.34\")",
+      "note": "Typically ~50% of the estimate total; confirm the company's standard deposit % before filling this in."
+    },
+    {
+      "title": "RSM",
+      "definition_id": "1000000027",
+      "type": "picklist",
+      "sample_allowed_values": [
+        "Avi Shoshan", "Efrain", "Trever", "Emanuel Teral(Alex)", "Derrick", "Private Label", "Sean",
+        "Service", "Stefan", "Spencer", "Tyler", "Jameson Dahn", "David Rodriquez", "William"
+      ]
+    },
+    {
+      "title": "2nd RSM",
+      "definition_id": "1000000028",
+      "type": "picklist",
+      "note": "Optional; leave blank ('NO') if there is no secondary RSM."
+    },
+    {
+      "title": "Q#/Project",
+      "definition_id": "1000000029",
+      "type": "text",
+      "note": "Free-text project/quote number. On 11180 this equaled the Customer PO value (95238)."
+    },
+    {
+      "title": "Customer PO ",
+      "definition_id": "1000000033",
+      "type": "text",
+      "note": "Customer's own PO/quote reference number. On 11172/11152 this matched the 'Q Number/PO #' field value."
+    },
+    {
+      "title": "JDM Folder",
+      "definition_id": "1000000030",
+      "type": "text",
+      "note": "Usually blank; internal folder reference when used."
+    },
+    {
+      "title": "Sales Tax Exempt",
+      "definition_id": "1000000034",
+      "type": "text/boolean",
+      "note": "Usually blank."
+    },
+    {
+      "title": "Lead Source",
+      "definition_id": "1000001086",
+      "type": "text",
+      "note": "Usually blank."
+    }
+  ],
+
+  "line_item_template": {
+    "note": "Each line needs product_id (from search_products), description, amount (unit rate), quantity, taxable.",
+    "example_fields": {
+      "product_id": "<QBO item id, e.g. from search_products('LTS.30')>",
+      "description": "All Aluminum Thermally Broken Panda Select Lift & Slide",
+      "quantity": 1,
+      "amount": 9028.66,
+      "taxable": true
+    },
+    "common_fee_items": ["Z Fees:Crating", "Z Fees:Shipping Fee", "Z Fees:Soft Wrap", "Z Fees:Deposit"]
+  },
+
+  "filled_examples": {
+    "11180": {
+      "customer": "JDP Associates", "project": "Aldo Residence Add On",
+      "txn_date": "2026-09-17", "amount": "31856.68", "balance": "0.00", "accept_status": "ACCEPTED",
+      "custom_field_values": {
+        "Residential or Commercial": "Residential -Single Family",
+        "Dealer": "NO",
+        "Outside Sales Rep": "NO",
+        "Deposit Due": "$15,928.34",
+        "RSM": "Trever",
+        "2nd RSM": "Efrain",
+        "Q#/Project": "95238",
+        "Customer PO ": "95238",
+        "JDM Folder": null,
+        "Sales Tax Exempt": null,
+        "Lead Source": null
+      }
+    },
+    "11172": {
+      "customer": "Integrated Door & Window Systems", "project": "Patel Entry Door",
+      "txn_date": "2026-09-14", "amount": "25916.61", "balance": "0.00", "accept_status": "ACCEPTED",
+      "custom_field_values": {
+        "Residential or Commercial": "Residential -Single Family",
+        "Dealer": "Integrated Door and Window Systems, Inc.",
+        "Outside Sales Rep": "NO",
+        "Deposit Due": "$12,958.31",
+        "RSM": "Sean",
+        "2nd RSM": null,
+        "Q#/Project": null,
+        "Customer PO ": "92437",
+        "JDM Folder": null,
+        "Sales Tax Exempt": null,
+        "Lead Source": null
+      }
+    },
+    "11152": {
+      "customer": "Ken Caryl Glass", "project": "McDonald Audi",
+      "txn_date": "2026-09-04", "amount": "35384.86", "balance": "0.00", "accept_status": "ACCEPTED",
+      "custom_field_values": {
+        "Residential or Commercial": "Showroom",
+        "Dealer": "Ken Caryl Glass Inc",
+        "Outside Sales Rep": "NO",
+        "Deposit Due": "$17,692.43",
+        "RSM": "Efrain",
+        "2nd RSM": null,
+        "Q#/Project": null,
+        "Customer PO ": "91176",
+        "JDM Folder": null,
+        "Sales Tax Exempt": null,
+        "Lead Source": null
+      }
+    }
+  },
+
+  "new_estimate_checklist": [
+    "1. search_customer for the PROJECT name (sub-customer), not the parent company, to get customer_id.",
+    "   - If the project/sub-customer doesn't exist yet, create it under the parent via QBO UI (or create_customer with the parent as parent, if supported) before creating the estimate.",
+    "2. search_products for each item/service line to get product_id and confirm taxable flag.",
+    "3. Call qbo_sales_create_estimate with customer_data.customer_id + line_items.",
+    "4. Open the new estimate in QBO and fill in the custom fields listed above (Residential or Commercial, Dealer, RSM, 2nd RSM, Deposit Due, Q#/Project, Customer PO) manually — the MCP create/update tools can't write these.",
+    "5. Re-pull the estimate by estimate_id (not doc_number) afterward to verify all custom fields saved correctly."
+  ]
+}
