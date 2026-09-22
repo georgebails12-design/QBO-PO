@@ -34,3 +34,19 @@ human label shown in the QBO UI.
 - **No custom_fields parameter on write.** `qbo_sales_create_estimate` /
   `qbo_sales_update_estimate` cannot set any of the above. They must be set manually in QBO, or
   via a direct API call outside these MCP tools.
+- **These fields also live on the Customer record**, not just the estimate — confirmed by the
+  QBO "Edit Customer" screen showing the same field set (Residential or Commercial, Dealer,
+  Outside Sales Rep, Deposit Due, RSM, 2nd RSM, Q#/Project, JDM Folder, Customer PO). This
+  matches the `associatedEntityTypes` seen on each field's definition, which include
+  `/network/Contact` with `subtype: CUSTOMER` alongside the transaction subtypes.
+- **There is no `update_customer` tool in this MCP server at all** — only `create_customer`
+  (which silently dedupes to an existing customer by name, per `found_existing` in its
+  response) and `search_customer`. Neither `create_customer` nor any other tool exposes a
+  parent-customer/`ParentRef` field or a custom-fields field. **Do not attempt to fake a
+  sub-customer by putting a colon in `display_name`** (e.g. `"Parent:Child"`) — this was tried
+  and QBO's API rejects it with `Invalid name`; a literal colon is not how sub-customer
+  hierarchy works. There is currently no way to create a true sub-customer/project or set any
+  customer-level custom field through these MCP tools — say so plainly rather than attempting a
+  workaround, and point the user to the QBO UI (Edit Customer → set "Sub-customer/job of" +
+  parent company) or a direct QuickBooks REST API call (`Customer.ParentRef` + `Job: true`,
+  and a `CustomField` array patch) as the only real options.
