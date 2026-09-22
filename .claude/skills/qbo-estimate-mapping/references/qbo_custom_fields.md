@@ -123,10 +123,19 @@ always been hard-capped at exactly 3 slots (long predating "App Foundations"), i
 OAuth scope. Q Number/PO #, Sales Rep, and Deposit Due fill that fixed cap on this company. The
 other custom fields (QuickBooks Online Advanced's newer field types, up to 10 more per company)
 live entirely outside this REST mechanism — in Intuit's separate GraphQL-based Custom Fields
-platform. Whether/how to get write access to that GraphQL platform (a distinct developer
-enrollment, not a scope toggle on an existing app) is unconfirmed and unexplored — don't repeat
-the earlier mistake of asserting a fix without testing it against the actual app first. The only
-CONFIRMED way to set these 4+ fields today is manual entry in the QBO UI.
+platform.
+
+**Also tested and CONFIRMED CLOSED (2026-09-22): this app cannot reach the GraphQL platform at
+all.** POSTed a plain schema-introspection query (`{ __schema { queryType { name } ... } }`) to
+`https://qb.api.intuit.com/graphql` using the exact same `quickBooksOAuth2Api` credential that
+successfully writes the legacy REST fields. Result: **HTTP 403 Forbidden, empty body**, rejected
+at the API gateway (`istio-envoy`/`gw-go-filter` in the response headers) before the query was
+even parsed. This isn't a query-shape or scope-nuance problem — this specific Intuit app is not
+authorized for the App Foundations API at all, full stop. Getting there would require actually
+enrolling this app in Intuit's App Foundations program — a separate product/business
+relationship with Intuit, not a config change, credential swap, or different n8n node. Don't
+re-attempt this via n8n or any REST/GraphQL trick without that enrollment existing first — it
+will 403 again. The only CONFIRMED way to set these 4+ fields today is manual entry in the QBO UI.
 
 Sources:
 - https://blogs.intuit.com/2025/12/01/custom-fields-api-extending-quickbooks-online-with-flexible-metadata/
