@@ -604,21 +604,25 @@ function setupSubmit() {
       }),
     }).then((result) => {
       if (!state.pendingAttachments.length) {
-        alert(`Purchase Order ${result.doc_number || result.id} was created in QuickBooks.`);
-        resetForm();
+        finishCreate(result, `Purchase Order ${result.doc_number || result.id} was created in QuickBooks.`);
         return;
       }
       uploadPendingAttachments(result.id).then(() => {
-        alert(`Purchase Order ${result.doc_number || result.id} was created in QuickBooks, `
+        finishCreate(result, `Purchase Order ${result.doc_number || result.id} was created in QuickBooks, `
           + `with ${state.pendingAttachments.length} attachment(s).`);
-        resetForm();
       }).catch((e) => {
-        alert(`Purchase Order ${result.doc_number || result.id} was created, but attaching files failed:\n${e.message}\n`
+        finishCreate(result, `Purchase Order ${result.doc_number || result.id} was created, but attaching files failed:\n${e.message}\n`
           + `You can add them from View Purchase Orders instead.`);
-        resetForm();
       });
     }).catch((e) => alert(`Could not create purchase order:\n${e.message}`));
   });
+}
+
+function finishCreate(result, message) {
+  if (confirm(`${message}\n\nDownload the PDF now?`)) {
+    window.open(`/api/purchase-orders/${result.id}/pdf`, '_blank');
+  }
+  resetForm();
 }
 
 function resetForm() {

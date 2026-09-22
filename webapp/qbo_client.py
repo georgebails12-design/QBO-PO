@@ -381,6 +381,19 @@ def get_purchase_order(po_id):
     return data.get("PurchaseOrder", {})
 
 
+def get_purchase_order_pdf(po_id):
+    """QuickBooks' own rendered PDF of the PO (same layout as the QBO UI's PDF)."""
+    access_token, realm_id, environment = get_valid_access_token()
+    url = f"{_api_base(environment, realm_id)}/purchaseorder/{po_id}/pdf"
+    resp = requests.get(
+        url, headers={"Authorization": f"Bearer {access_token}", "Accept": "application/pdf"},
+        params={"minorversion": MINOR_VERSION}, timeout=30,
+    )
+    if resp.status_code != 200:
+        raise QBOError(f"Could not get the PO PDF ({resp.status_code}): {resp.text}")
+    return resp.content
+
+
 def search_purchase_orders(doc_number=None, vendor_id=None, limit=25):
     """doc_number does an exact match (QBO's DocNumber isn't LIKE-filterable
     reliably across environments); vendor_id filters to one vendor. With

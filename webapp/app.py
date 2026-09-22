@@ -374,6 +374,21 @@ def api_purchase_order_detail(po_id):
     return jsonify(formatted)
 
 
+@app.route("/api/purchase-orders/<po_id>/pdf")
+@auth.login_required
+def api_purchase_order_pdf(po_id):
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        pdf_bytes = qbo_client.get_purchase_order_pdf(po_id)
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+    return Response(
+        pdf_bytes, mimetype="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="PO-{po_id}.pdf"'},
+    )
+
+
 @app.route("/api/purchase-orders/<po_id>/attachments", methods=["POST"])
 @auth.login_required
 def api_purchase_order_attach(po_id):

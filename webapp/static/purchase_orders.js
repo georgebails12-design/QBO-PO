@@ -58,6 +58,7 @@ function loadDetail(id) {
   const card = document.getElementById('po-detail-card');
   card.style.display = 'block';
   document.getElementById('po-detail-title').textContent = 'Loading...';
+  document.getElementById('po-detail-pdf-btn').onclick = () => window.open(`/api/purchase-orders/${id}/pdf`, '_blank');
   api(`/api/purchase-orders/${id}`)
     .then((po) => {
       document.getElementById('po-detail-title').textContent = `PO #${po.doc_number || po.id}`;
