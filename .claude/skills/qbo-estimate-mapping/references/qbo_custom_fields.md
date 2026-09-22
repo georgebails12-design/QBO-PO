@@ -10,7 +10,7 @@ human label shown in the QBO UI.
 | Residential or Commercial | 1000000019 | picklist | 13 options incl. Residential -Single Family, Multi-Family, Hotel/Resort, Showroom, Retail, Office Building, etc. |
 | Dealer | 1000000020 | picklist | ~90+ options (some deleted/legacy). Use "NO" when there is no dealer. |
 | Outside Sales Rep | 1000000022 | picklist | Use "NO" when none. |
-| Deposit Due | 1000000023 | currency (free-text, e.g. `"$15,928.34"`) | Observed to equal exactly 50% of the estimate total on every example so far — likely driven by a 50/50 deposit schedule (see CenterPoint `Configurable27`). |
+| Deposit Due | 1000000023 | currency (free-text, e.g. `"$15,928.34"`) | Equals 50% of **(Total − any "Total sales tax" line item)**, not 50% of the raw total — confirmed on estimate 11179, where a sales tax line ($8,064.16) is present: (106,377.76 − 8,064.16) × 50% = 49,156.80, exact match. On estimates with no tax line (11172, 11152) this collapses to 50% of total, which is what made the simpler rule look right at first. Likely driven by a 50/50 deposit schedule (see CenterPoint `Configurable27`) applied to the pre-tax amount. |
 | RSM | 1000000027 | picklist | First-name-only values (Trever, Efrain, Sean, Avi Shoshan, etc.) |
 | 2nd RSM | 1000000028 | picklist | Optional; often blank. |
 | Q#/Project | 1000000029 | text | Free-text project/quote number. Not always populated — sometimes only "Customer PO" carries the number. |
@@ -34,6 +34,14 @@ human label shown in the QBO UI.
 - **No custom_fields parameter on write.** `qbo_sales_create_estimate` /
   `qbo_sales_update_estimate` cannot set any of the above. They must be set manually in QBO, or
   via a direct API call outside these MCP tools.
+- **A deleted custom field definition can still hold a value and still appear in the array.**
+  Estimate 11179 carries a value (`"91229"`) under a field whose `definition.deleted` is `true`
+  and whose title is also "Q Number/PO #" (definition id `1000000016` — a different, older
+  definition ID than the live one at `1000000029`). Its value did NOT match the live "Customer
+  PO" field (`714093`) on the same estimate — on every other estimate seen so far those two
+  numbers were identical. Don't assume they always agree; check both, and don't discard
+  `deleted: true` entries as noise, since they may be the only place an original quote number
+  survives after a field got reconfigured.
 - **These fields also live on the Customer record**, not just the estimate — confirmed by the
   QBO "Edit Customer" screen showing the same field set (Residential or Commercial, Dealer,
   Outside Sales Rep, Deposit Due, RSM, 2nd RSM, Q#/Project, JDM Folder, Customer PO). This
