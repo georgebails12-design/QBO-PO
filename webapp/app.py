@@ -22,7 +22,8 @@ import threading
 import time
 import uuid
 
-from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
+import requests
+from flask import Flask, Response, jsonify, redirect, render_template, request, send_file, session, url_for
 
 import auth
 import cardinal_glass_output
@@ -83,6 +84,12 @@ def index():
 @auth.login_required
 def categories_page():
     return render_template("manage_categories.html", user=auth.current_user())
+
+
+@app.route("/purchase-orders")
+@auth.login_required
+def purchase_orders_page():
+    return render_template("view_purchase_orders.html", user=auth.current_user())
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +339,86 @@ def api_cardinal_csv():
         "mismatched_spacer": mismatched,
         "warnings": [str(w.message) for w in caught],
     })
+
+
+# ---------------------------------------------------------------------------
+# View existing purchase orders, and file attachments on them
+# ---------------------------------------------------------------------------
+@app.route("/api/purchase-orders")
+@auth.login_required
+def api_purchase_orders_search():
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    doc_number = (request.args.get("doc_number") or "").strip() or None
+    vendor_id = (request.args.get("vendor_id") or "").strip() or None
+    try:
+        results = qbo_client.search_purchase_orders(doc_number=doc_number, vendor_id=vendor_id, limit=25)
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+    return jsonify([qbo_client.format_purchase_order(po) for po in results])
+
+
+@app.route("/api/purchase-orders/<po_id>")
+@auth.login_required
+def api_purchase_order_detail(po_id):
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        po = qbo_client.get_purchase_order(po_id)
+        if not po:
+            return err("Purchase order not found.", 404)
+        formatted = qbo_client.format_purchase_order(po)
+        formatted["attachments"] = qbo_client.get_attachments_for_entity("PurchaseOrder", po_id)
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+    return jsonify(formatted)
+
+
+@app.route("/api/purchase-orders/<po_id>/attachments", methods=["POST"])
+@auth.login_required
+def api_purchase_order_attach(po_id):
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return err("No file uploaded.")
+    content = file.read()
+    if len(content) > 25 * 1024 * 1024:
+        return err("File is too large (25MB limit).")
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        result = qbo_client.upload_attachment(
+            "PurchaseOrder", po_id, file.filename, content, file.mimetype or "application/octet-stream",
+        )
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+    return jsonify(result)
+
+
+@app.route("/api/attachments/<attachable_id>", methods=["DELETE"])
+@auth.login_required
+def api_attachment_delete(attachable_id):
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        qbo_client.delete_attachment(attachable_id)
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+    return jsonify({"deleted": True})
+
+
+@app.route("/api/attachments/<attachable_id>/download")
+@auth.login_required
+def api_attachment_download(attachable_id):
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        temp_url = qbo_client.get_attachment_download_url(attachable_id)
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+    upstream = requests.get(temp_url, timeout=30)
+    if upstream.status_code != 200:
+        return err("Could not download the file from QuickBooks.", 502)
+    return Response(upstream.content, mimetype=upstream.headers.get("Content-Type", "application/octet-stream"))
 
 
 @app.route("/downloads/<name>")

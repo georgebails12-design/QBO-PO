@@ -373,6 +373,152 @@ def create_purchase_order(
 
 
 # ---------------------------------------------------------------------------
+# Pulling up an existing Purchase Order
+# ---------------------------------------------------------------------------
+def get_purchase_order(po_id):
+    """Fetch one PurchaseOrder by its QBO Id (not DocNumber)."""
+    data = _get(f"purchaseorder/{po_id}")
+    return data.get("PurchaseOrder", {})
+
+
+def search_purchase_orders(doc_number=None, vendor_id=None, limit=25):
+    """doc_number does an exact match (QBO's DocNumber isn't LIKE-filterable
+    reliably across environments); vendor_id filters to one vendor. With
+    neither, returns the most recently created POs."""
+    clauses = []
+    if doc_number:
+        clauses.append(f"DocNumber = '{doc_number}'")
+    if vendor_id:
+        clauses.append(f"VendorRef = '{vendor_id}'")
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    sql = f"SELECT * FROM PurchaseOrder{where} ORDERBY MetaData.CreateTime DESC MAXRESULTS {int(limit)}"
+    data = _get("query", params={"query": sql})
+    return data.get("QueryResponse", {}).get("PurchaseOrder", [])
+
+
+def format_purchase_order(po):
+    """Flattens a raw QBO PurchaseOrder into the shape the GUI/web app render."""
+    lines = []
+    for line in po.get("Line", []):
+        detail_type = line.get("DetailType")
+        if detail_type == "ItemBasedExpenseLineDetail":
+            d = line.get("ItemBasedExpenseLineDetail", {})
+            lines.append({
+                "kind": "item",
+                "name": d.get("ItemRef", {}).get("name"),
+                "item_id": d.get("ItemRef", {}).get("value"),
+                "description": line.get("Description", ""),
+                "qty": d.get("Qty"),
+                "rate": d.get("UnitPrice"),
+                "amount": line.get("Amount"),
+                "customer": d.get("CustomerRef", {}).get("name"),
+            })
+        elif detail_type == "AccountBasedExpenseLineDetail":
+            d = line.get("AccountBasedExpenseLineDetail", {})
+            lines.append({
+                "kind": "category",
+                "name": d.get("AccountRef", {}).get("name"),
+                "account_id": d.get("AccountRef", {}).get("value"),
+                "description": line.get("Description", ""),
+                "amount": line.get("Amount"),
+                "customer": d.get("CustomerRef", {}).get("name"),
+            })
+
+    q_project = ""
+    for cf in po.get("CustomField", []) or []:
+        if cf.get("Name") == Q_PROJECT_CUSTOM_FIELD_NAME:
+            q_project = cf.get("StringValue", "") or ""
+
+    return {
+        "id": po.get("Id"),
+        "doc_number": po.get("DocNumber"),
+        "vendor": po.get("VendorRef", {}).get("name"),
+        "vendor_id": po.get("VendorRef", {}).get("value"),
+        "txn_date": po.get("TxnDate"),
+        "memo": po.get("PrivateNote", ""),
+        "q_project": q_project,
+        "total": po.get("TotalAmt"),
+        "status": po.get("POStatus", ""),
+        "lines": lines,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Attachments (receipts, packing slips, etc.) on a Purchase Order
+# ---------------------------------------------------------------------------
+def get_attachments_for_entity(entity_type, entity_id):
+    """entity_type e.g. 'PurchaseOrder'. Confirmed queryable directly by
+    AttachableRef.EntityRef per Intuit's own Attachable API docs."""
+    sql = (
+        "SELECT * FROM Attachable WHERE AttachableRef.EntityRef.Type = "
+        f"'{entity_type}' AND AttachableRef.EntityRef.value = '{entity_id}'"
+    )
+    data = _get("query", params={"query": sql})
+    rows = data.get("QueryResponse", {}).get("Attachable", [])
+    return [{
+        "id": a.get("Id"),
+        "file_name": a.get("FileName"),
+        "content_type": a.get("ContentType"),
+        "size": a.get("Size"),
+        "note": a.get("Note"),
+        "created": (a.get("MetaData") or {}).get("CreateTime"),
+    } for a in rows]
+
+
+def get_attachment_download_url(attachable_id):
+    """A temporary (~15 min) pre-signed URL for the file's actual bytes."""
+    access_token, realm_id, environment = get_valid_access_token()
+    url = f"{_api_base(environment, realm_id)}/download/{attachable_id}"
+    resp = requests.get(
+        url, headers={"Authorization": f"Bearer {access_token}", "Accept": "text/plain"},
+        params={"minorversion": MINOR_VERSION}, timeout=30,
+    )
+    if resp.status_code != 200:
+        raise QBOError(f"Could not get a download URL ({resp.status_code}): {resp.text}")
+    text = resp.text.strip()
+    if text.startswith('"') and text.endswith('"'):
+        return json.loads(text)
+    return text
+
+
+def delete_attachment(attachable_id):
+    """Deletes an attachment. Requires the current SyncToken, so we read it first."""
+    current = _get(f"attachable/{attachable_id}").get("Attachable", {})
+    payload = {"Id": attachable_id, "SyncToken": current.get("SyncToken", "0")}
+    data = _post("attachable?operation=delete", payload)
+    return data.get("Attachable", {})
+
+
+def upload_attachment(entity_type, entity_id, filename, content_bytes, content_type):
+    """Uploads a file and links it to entity_type/entity_id (e.g. a PurchaseOrder) in one call."""
+    access_token, realm_id, environment = get_valid_access_token()
+    url = f"{_api_base(environment, realm_id)}/upload"
+    metadata = {
+        "AttachableRef": [{"EntityRef": {"type": entity_type, "value": str(entity_id)}}],
+        "FileName": filename,
+        "ContentType": content_type,
+    }
+    files = {
+        "file_metadata_01": (None, json.dumps(metadata), "application/json"),
+        "file_content_01": (filename, content_bytes, content_type),
+    }
+    resp = requests.post(
+        url, headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+        params={"minorversion": MINOR_VERSION}, files=files, timeout=60,
+    )
+    if resp.status_code not in (200, 201):
+        raise QBOError(f"QuickBooks upload failed ({resp.status_code}): {resp.text}")
+    results = resp.json().get("AttachableResponse", [])
+    if not results:
+        raise QBOError("Upload succeeded but QuickBooks returned no attachment info.")
+    att = results[0].get("Attachable", {})
+    return {
+        "id": att.get("Id"), "file_name": att.get("FileName"),
+        "content_type": att.get("ContentType"), "size": att.get("Size"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Category -> account mapping (limits which categories the GUI offers)
 # ---------------------------------------------------------------------------
 def load_categories():

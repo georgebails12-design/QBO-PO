@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}View Purchase Orders{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-title-row">
+    <h2>View Purchase Orders</h2>
+  </div>
+  <div class="field-row">
+    <label class="field small">PO #
+      <input type="text" id="po-search-docnumber" placeholder="e.g. 31112">
+    </label>
+    <div class="field small" style="flex: 0 0 auto;">
+      <button type="button" class="btn-primary" id="po-search-btn">Search</button>
+    </div>
+  </div>
+  <p class="hint">Leave the PO # blank and click Search to see the most recently created purchase orders.</p>
+  <table class="grid" id="po-search-table">
+    <thead><tr><th>PO #</th><th>Vendor</th><th>Date</th><th>Status</th><th>Total</th></tr></thead>
+    <tbody id="po-search-table-body"></tbody>
+  </table>
+  <p class="status-line" id="po-search-status"></p>
+</div>
+
+<div class="card" id="po-detail-card" style="display:none;">
+  <div class="card-title-row">
+    <h2 id="po-detail-title">Purchase Order</h2>
+  </div>
+  <div id="po-detail-summary"></div>
+  <table class="grid" id="po-detail-lines-table">
+    <thead><tr><th>Item / Account</th><th>Description</th><th>Qty</th><th>Rate</th><th class="amount-cell">Amount</th></tr></thead>
+    <tbody id="po-detail-lines-body"></tbody>
+  </table>
+
+  <div class="card-title-row" style="margin-top: 18px;">
+    <h2>Attachments</h2>
+    <div class="card-title-actions">
+      <input type="file" id="attachment-file-input" style="display:none;">
+      <button type="button" class="btn-secondary" id="attachment-upload-btn">Attach file...</button>
+    </div>
+  </div>
+  <table class="grid" id="attachments-table">
+    <thead><tr><th>File</th><th>Size</th><th>Added</th><th></th></tr></thead>
+    <tbody id="attachments-table-body"></tbody>
+  </table>
+  <p class="status-line" id="attachment-status"></p>
+</div>
+
+<script src="{{ url_for('static', filename='purchase_orders.js') }}"></script>
+{% endblock %}
