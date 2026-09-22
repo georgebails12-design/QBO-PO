@@ -374,6 +374,30 @@ def api_purchase_order_detail(po_id):
     return jsonify(formatted)
 
 
+@app.route("/api/purchase-orders/<po_id>", methods=["PUT"])
+@auth.login_required
+def api_purchase_order_update(po_id):
+    data = request.get_json(force=True)
+    item_lines = data.get("item_lines")
+    category_lines = data.get("category_lines")
+    if (item_lines is not None or category_lines is not None) and not (item_lines or category_lines):
+        return err("Add at least one line item or category line.")
+
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        qbo_client.update_purchase_order(
+            po_id, item_lines=item_lines, category_lines=category_lines,
+            memo=data.get("memo"), txn_date=data.get("txn_date") or None, q_project=data.get("q_project"),
+        )
+        po = qbo_client.get_purchase_order(po_id)
+        formatted = qbo_client.format_purchase_order(po)
+        formatted["attachments"] = qbo_client.get_attachments_for_entity("PurchaseOrder", po_id)
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+    return jsonify(formatted)
+
+
 @app.route("/api/purchase-orders/<po_id>/pdf")
 @auth.login_required
 def api_purchase_order_pdf(po_id):

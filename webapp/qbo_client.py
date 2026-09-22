@@ -372,6 +372,69 @@ def create_purchase_order(
     return {"id": po.get("Id"), "doc_number": po.get("DocNumber"), "raw": po}
 
 
+def update_purchase_order(
+    po_id, item_lines=None, category_lines=None, memo=None, txn_date=None, q_project=None,
+):
+    """
+    Edits an existing PurchaseOrder. Starts from the currently-saved object
+    (so a full/non-sparse update doesn't silently clear fields we don't
+    know about, like ShipAddr) and only overwrites what's passed in.
+
+    item_lines/category_lines (when either is not None) replace the PO's
+    entire Line array -- same shape as create_purchase_order. Pass both to
+    keep/edit all lines; a line left out is removed from the PO.
+    """
+    current = get_purchase_order(po_id)
+    if not current:
+        raise QBOError(f"Purchase order {po_id} not found.")
+
+    payload = dict(current)
+
+    if item_lines is not None or category_lines is not None:
+        po_lines = []
+        for line in (item_lines or []):
+            qty = float(line["qty"])
+            unit_price = float(line["unit_price"])
+            detail = {"ItemRef": {"value": str(line["item_id"])}, "Qty": qty, "UnitPrice": unit_price}
+            if line.get("customer_id"):
+                detail["CustomerRef"] = {"value": str(line["customer_id"])}
+            po_lines.append({
+                "DetailType": "ItemBasedExpenseLineDetail",
+                "Amount": round(qty * unit_price, 2),
+                "Description": line.get("description", ""),
+                "ItemBasedExpenseLineDetail": detail,
+            })
+        for line in (category_lines or []):
+            detail = {"AccountRef": {"value": str(line["account_id"])}}
+            if line.get("customer_id"):
+                detail["CustomerRef"] = {"value": str(line["customer_id"])}
+            po_lines.append({
+                "DetailType": "AccountBasedExpenseLineDetail",
+                "Amount": round(float(line["amount"]), 2),
+                "Description": line.get("description", ""),
+                "AccountBasedExpenseLineDetail": detail,
+            })
+        payload["Line"] = po_lines
+
+    if memo is not None:
+        payload["PrivateNote"] = memo
+    if txn_date:
+        payload["TxnDate"] = txn_date
+    if q_project is not None:
+        custom_fields = [cf for cf in payload.get("CustomField", []) if cf.get("Name") != Q_PROJECT_CUSTOM_FIELD_NAME]
+        custom_fields.append({
+            "DefinitionId": Q_PROJECT_CUSTOM_FIELD_DEFINITION_ID,
+            "Name": Q_PROJECT_CUSTOM_FIELD_NAME,
+            "Type": "StringType",
+            "StringValue": q_project,
+        })
+        payload["CustomField"] = custom_fields
+
+    data = _post("purchaseorder", payload)
+    po = data.get("PurchaseOrder", {})
+    return {"id": po.get("Id"), "doc_number": po.get("DocNumber"), "raw": po}
+
+
 # ---------------------------------------------------------------------------
 # Pulling up an existing Purchase Order
 # ---------------------------------------------------------------------------
