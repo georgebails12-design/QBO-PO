@@ -98,32 +98,35 @@ using n8n and only need these 3 legacy fields.
 
 **2. Modern custom fields (Residential or Commercial, Dealer, RSM, 2nd RSM, Q#/Project,
 Customer PO, JDM Folder, Sales Tax Exempt, Lead Source — the `1000000019`-style ids) —
-DID NOT WRITE in the live test, but NOT because of a different API shape.** The same live test
-tried writing `DefinitionId: "1000000019"` ("Residential or Commercial") and `"1000000027"`
-("RSM") through the identical sparse-POST `CustomField` array. The call returned HTTP 200 and the
-SyncToken incremented, but the returned `Estimate.CustomField` array still contained only the
-legacy slot — the submitted modern fields were silently dropped, not rejected with an error.
+CONFIRMED NOT WRITABLE via the classic REST API. This is a hard product limitation, NOT a
+scope/permission issue** — verified directly against the live Intuit Developer app on
+2026-09-22, not just inferred from docs. The same live test tried writing
+`DefinitionId: "1000000019"` ("Residential or Commercial") and `"1000000027"` ("RSM") through the
+identical sparse-POST `CustomField` array used successfully for the legacy fields. The call
+returned HTTP 200 and the SyncToken incremented, but the returned `Estimate.CustomField` array
+still contained only the 3 legacy slots — the submitted modern fields were silently dropped, not
+rejected with an error.
 
-**Root cause (per Intuit's own docs, not just inference from the test): missing OAuth scope, not
-a different endpoint.** Custom field *definitions* (schema/picklist options) are managed via the
-App Foundations GraphQL API (`https://qb.api.intuit.com/graphql`), but assigning a *value* to a
-transaction still goes through this same classic REST `CustomField` array — it just requires the
-OAuth token to carry the `app-foundations.custom-field-definitions` scope (or the `.read` variant
-for read-only) in addition to the standard `com.intuit.quickbooks.accounting` scope. n8n's
-registered Intuit app doesn't have that scope, which is exactly consistent with what we saw: QBO
-accepts the sparse POST but silently ignores any `CustomField` entry it doesn't recognize under
-the caller's granted scope, rather than erroring.
+**A previous version of this note claimed the fix was adding an `app-foundations.custom-field-definitions`
+OAuth scope and re-authorizing. That was WRONG — retract it if you find it anywhere else.**
+Checked directly on the Permissions page for the actual Intuit app behind the
+`quickBooksOAuth2Api` credential: only two scopes exist on that app, `com.intuit.quickbooks.accounting`
+and `com.intuit.quickbooks.payment`, both already granted and **not editable toggles** — there is
+no separate custom-fields scope to add, on this app or apparently on this class of app at all.
+Also ruled out as causes: (a) the fields not being enabled for the Estimate form — every one of
+them has `SALE_ESTIMATE` listed as an active, non-deleted entity type in its own definition
+metadata, matching what's visibly rendered in the QBO UI; (b) wrong `DefinitionId` — these ids
+were read directly off this same company's live estimates, not guessed.
 
-**The actual fix**: someone with access to the Intuit Developer app behind the
-`quickBooksOAuth2Api` credential needs to (1) add the `app-foundations.custom-field-definitions`
-scope to that app in developer.intuit.com's settings, then (2) re-authorize the connection —
-**adding a scope to an already-authorized OAuth connection requires the company admin to go
-through the consent screen again**, it cannot be silently granted via the existing refresh token.
-Once re-authorized, retry the exact same sparse-POST request (workflow `1tF9QG7psykePj1t`) with
-no code changes — it should work once the scope is present. Supporting signal: this MCP server's
-own `qbo_sales_get_estimates` tool already reads these modern fields with full schema/picklist
-detail, meaning some Intuit app in this stack already holds at least the `.read` scope — so
-getting the write scope approved is a configuration change, not new infrastructure.
+**Actual conclusion**: the classic QuickBooks Accounting REST API's `CustomField` array has
+always been hard-capped at exactly 3 slots (long predating "App Foundations"), independent of any
+OAuth scope. Q Number/PO #, Sales Rep, and Deposit Due fill that fixed cap on this company. The
+other custom fields (QuickBooks Online Advanced's newer field types, up to 10 more per company)
+live entirely outside this REST mechanism — in Intuit's separate GraphQL-based Custom Fields
+platform. Whether/how to get write access to that GraphQL platform (a distinct developer
+enrollment, not a scope toggle on an existing app) is unconfirmed and unexplored — don't repeat
+the earlier mistake of asserting a fix without testing it against the actual app first. The only
+CONFIRMED way to set these 4+ fields today is manual entry in the QBO UI.
 
 Sources:
 - https://blogs.intuit.com/2025/12/01/custom-fields-api-extending-quickbooks-online-with-flexible-metadata/
