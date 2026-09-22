@@ -10,7 +10,16 @@ human label shown in the QBO UI.
 | Residential or Commercial | 1000000019 | picklist | 13 options incl. Residential -Single Family, Multi-Family, Hotel/Resort, Showroom, Retail, Office Building, etc. |
 | Dealer | 1000000020 | picklist | ~90+ options (some deleted/legacy). Use "NO" when there is no dealer. |
 | Outside Sales Rep | 1000000022 | picklist | Use "NO" when none. |
-| Deposit Due | 1000000023 | currency (free-text, e.g. `"$15,928.34"`) | Equals 50% of **(Total − any "Total sales tax" line item)**, not 50% of the raw total — confirmed on estimate 11179, where a sales tax line ($8,064.16) is present: (106,377.76 − 8,064.16) × 50% = 49,156.80, exact match. On estimates with no tax line (11172, 11152) this collapses to 50% of total, which is what made the simpler rule look right at first. Likely driven by a 50/50 deposit schedule (see CenterPoint `Configurable27`) applied to the pre-tax amount. |
+| Deposit Due | 1000000023 | currency (free-text, e.g. `"$15,928.34"`) | Equals 50% of **(Total − any "Total sales tax" line item)**, not 50% of the raw total — confirmed on estimate 11179, where a sales tax line ($8,064.16) is present: (106,377.76 − 8,064.16) × 50% = 49,156.80, exact match. On estimates with no tax line (11172, 11152) this collapses to 50% of total, which is what made the simpler rule look right at first. Likely driven by a 50/50 deposit schedule (see CenterPoint `Configurable27`) applied to the pre-tax amount. **This is a plain text custom field, entered by hand or by whatever built the estimate — it is NOT the same as QBO's native deposit-request feature (below) and setting one does not set the other.** |
+
+**QBO's native deposit request** (`update_estimate`'s `deposit: {percent}`/`{amount}` parameter,
+surfaced in the estimate response as `deposit.requested_amount`/`deposit.paid_amount`) is a
+**separate, unrelated mechanism** from the "Deposit Due" custom field above — confirmed by
+setting `deposit: {percent: 50}` on a test estimate and re-fetching it: `deposit.requested_amount`
+became `"100.00"` while the "Deposit Due" custom field stayed `null`. Whoever built 11180/11172/
+11152/11179 populated "Deposit Due" by hand (or via CenterPoint/n8n automation) as a distinct step
+— it was never derived from the native deposit request feature, and setting the native one is not
+a substitute for filling the custom field.
 | RSM | 1000000027 | picklist | First-name-only values (Trever, Efrain, Sean, Avi Shoshan, etc.) |
 | 2nd RSM | 1000000028 | picklist | Optional; often blank. |
 | Q#/Project | 1000000029 | text | Free-text project/quote number. Not always populated — sometimes only "Customer PO" carries the number. |
