@@ -10,6 +10,7 @@ const state = {
   itemRows: [],
   categoryRows: [],
   nextRowId: 1,
+  pendingAttachments: [],
 };
 
 function api(path, opts) {
@@ -513,6 +514,57 @@ function generateCardinalCsv() {
 }
 
 // ---------------------------------------------------------------------
+// Attachments (uploaded to QuickBooks after the PO is created)
+// ---------------------------------------------------------------------
+function renderPendingAttachments() {
+  const list = document.getElementById('po-attachment-list');
+  list.innerHTML = '';
+  if (!state.pendingAttachments.length) {
+    list.innerHTML = '<li class="hint">No files attached yet.</li>';
+    return;
+  }
+  state.pendingAttachments.forEach((file, idx) => {
+    const li = document.createElement('li');
+    const sizeKb = (file.size / 1024).toFixed(1);
+    li.innerHTML = `<span>${file.name} (${sizeKb} KB)</span>`;
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'row-remove';
+    removeBtn.textContent = '×';
+    removeBtn.addEventListener('click', () => {
+      state.pendingAttachments.splice(idx, 1);
+      renderPendingAttachments();
+    });
+    li.appendChild(removeBtn);
+    list.appendChild(li);
+  });
+}
+
+function setupAttachments() {
+  document.getElementById('po-attachment-add-btn').addEventListener('click', () => {
+    document.getElementById('po-attachment-input').click();
+  });
+  document.getElementById('po-attachment-input').addEventListener('change', (e) => {
+    state.pendingAttachments.push(...e.target.files);
+    renderPendingAttachments();
+    e.target.value = '';
+  });
+  renderPendingAttachments();
+}
+
+function uploadPendingAttachments(poId) {
+  return state.pendingAttachments.reduce((chain, file) => chain.then(() => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return fetch(`/api/purchase-orders/${poId}/attachments`, { method: 'POST', body: formData })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(`${file.name}: ${data.error || 'upload failed'}`);
+      });
+  }), Promise.resolve());
+}
+
+// ---------------------------------------------------------------------
 // Submit
 // ---------------------------------------------------------------------
 function setupSubmit() {
@@ -551,8 +603,20 @@ function setupSubmit() {
         doc_number: poNumber,
       }),
     }).then((result) => {
-      alert(`Purchase Order ${result.doc_number || result.id} was created in QuickBooks.`);
-      resetForm();
+      if (!state.pendingAttachments.length) {
+        alert(`Purchase Order ${result.doc_number || result.id} was created in QuickBooks.`);
+        resetForm();
+        return;
+      }
+      uploadPendingAttachments(result.id).then(() => {
+        alert(`Purchase Order ${result.doc_number || result.id} was created in QuickBooks, `
+          + `with ${state.pendingAttachments.length} attachment(s).`);
+        resetForm();
+      }).catch((e) => {
+        alert(`Purchase Order ${result.doc_number || result.id} was created, but attaching files failed:\n${e.message}\n`
+          + `You can add them from View Purchase Orders instead.`);
+        resetForm();
+      });
     }).catch((e) => alert(`Could not create purchase order:\n${e.message}`));
   });
 }
@@ -566,6 +630,8 @@ function resetForm() {
   document.getElementById('category-grid-body').innerHTML = '';
   state.itemRows = []; state.categoryRows = [];
   addItemRow(); addCategoryRow();
+  state.pendingAttachments = [];
+  renderPendingAttachments();
   updateTotal();
   suggestPoNumberOnLoad();
   document.getElementById('po-number').value = '';
@@ -579,6 +645,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupHeader();
   setupNewItemDialog();
   setupGlassDialog();
+  setupAttachments();
   setupSubmit();
   addItemRow();
   addCategoryRow();

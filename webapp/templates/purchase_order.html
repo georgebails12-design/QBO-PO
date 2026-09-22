@@ -74,6 +74,18 @@
   </table>
 </div>
 
+<div class="card">
+  <div class="card-title-row">
+    <h2>Attachments</h2>
+    <div class="card-title-actions">
+      <input type="file" id="po-attachment-input" multiple style="display:none;">
+      <button type="button" class="btn-secondary" id="po-attachment-add-btn">Attach file...</button>
+    </div>
+  </div>
+  <p class="hint">Files are uploaded to QuickBooks after the purchase order is created.</p>
+  <ul id="po-attachment-list" class="attachment-list"></ul>
+</div>
+
 <div class="footer-bar">
   <div id="total-display" class="total">Total: $0.00</div>
   <button type="button" id="submit-po" class="btn-primary">Create Purchase Order in QuickBooks</button>
