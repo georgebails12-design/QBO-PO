@@ -116,6 +116,30 @@ picker only lists the 3 legacy fields, confirming even n8n's dedicated node does
 ones). The only confirmed way to set them remains the QBO UI itself. If a real fix is ever found
 (e.g. a documented GraphQL mutation), record the exact request here.
 
-**Sub-customer nesting** (`ParentRef` + `Job: true`) has NOT been tested live — still unverified,
-same caveats as before. If picking this up again, follow the same pattern: GET for SyncToken,
-sparse POST, and actually read the result back to confirm rather than trusting a 200 response.
+**Sub-customer nesting** (`ParentRef` + `Job: true` on the Customer entity) — **CONFIRMED WORKING**,
+tested live the same way (n8n workflow id `86wUImQUMLfMBTPy`): a sparse POST to
+`/v3/company/<realmId>/customer` with
+```json
+{ "Id": "30810", "SyncToken": "<current>", "sparse": true, "Job": true, "ParentRef": { "value": "23787" } }
+```
+actually created the hierarchy — the response's `FullyQualifiedName` became `"Test:Test Project"`,
+and re-reading the estimate through `qbo_sales_get_estimates` confirmed `contact.display_name`
+also updated to `"Test:Test Project"`. So sub-customer/project creation IS automatable via the
+classic REST API — it's specifically the modern custom fields that aren't.
+
+### Why the modern fields aren't REST-writable (confirmed via Intuit's own docs, not just inference)
+
+A web search of Intuit's developer docs confirms the live-test result above: *"the QBO API
+supports only the first three string custom fields... With QuickBooks Online Advanced, customers
+can create up to 10 custom fields with various data types, but the standard REST API has
+limitations in accessing beyond the first three."* Intuit's own sample app for the modern fields
+(`IntuitDeveloper/Sampleapp-Customfields-Nodejs`) is built on **"the App Foundations GraphQL API,"
+not the REST Accounting API**. That matches the GraphQL-shaped global IDs this MCP server returns
+for the modern definitions. Getting write access to these 9 fields (Residential or Commercial,
+Dealer, Outside Sales Rep, RSM, 2nd RSM, Q#/Project, JDM Folder, Sales Tax Exempt, Lead Source)
+would require registering against that separate GraphQL/App Foundations platform — a different
+auth setup than the `quickBooksOAuth2Api` credential used for everything else here. Sources:
+- https://blogs.intuit.com/2025/12/01/custom-fields-api-extending-quickbooks-online-with-flexible-metadata/
+- https://help.developer.intuit.com/s/article/Enhanced-Custom-Fields-for-QuickBooks-Online-Advanced
+- https://help.developer.intuit.com/s/question/0D54R00007I7ImDSAV/custom-fields-in-quickbooks-online-api
+- https://github.com/IntuitDeveloper/Sampleapp-Customfields-Nodejs
