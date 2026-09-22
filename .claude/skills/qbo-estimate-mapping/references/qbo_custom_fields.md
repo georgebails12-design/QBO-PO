@@ -68,33 +68,54 @@ a substitute for filling the custom field.
   parent company) or a direct QuickBooks REST API call (`Customer.ParentRef` + `Job: true`,
   and a `CustomField` array patch) as the only real options.
 
-## Worked example: the raw API call to set sub-customer + custom fields
+## CONFIRMED (2026-09-22): there are TWO separate custom-field systems, and only one is writable via the classic REST API
 
-This is the request an n8n HTTP Request node (or Postman, or a script) would need, since no MCP
-tool here can do it. **Unverified — derived from Intuit's general Custom Fields API pattern, not
-executed against a live company.** Test on a single field first and confirm the response shape
-before batch-applying.
+This was tested live via an n8n workflow (HTTP Request nodes + the company's real
+`quickBooksOAuth2Api` credential, workflow id `1tF9QG7psykePj1t`) against the test estimate
+TEST-001, and verified afterward by reading it back through `qbo_sales_get_estimates`. Do not
+re-derive this from scratch — the two systems behave completely differently:
 
-1. `GET /v3/company/<realmId>/customer/<id>` first to read the current `SyncToken` — every QBO
-   update requires the record's current SyncToken or it's rejected.
-2. Sparse-update with the parent link and custom fields together:
-
+**1. Legacy custom fields (definition ids `"1"`, `"2"`, `"3"`) — WRITABLE.** These are QBO's old
+3-slot custom field feature. On this company: `"1"` = Q Number/PO #, `"2"` = Sales Rep (never seen
+populated), `"3"` = Deposit Due. Confirmed by live test: a sparse POST to
+`/v3/company/<realmId>/estimate` with
 ```json
-POST /v3/company/<realmId>/customer?minorversion=65
 {
-  "Id": "<the sub-customer's QBO numeric Id>",
-  "SyncToken": "<from step 1>",
+  "Id": "<estimate id>",
+  "SyncToken": "<current SyncToken>",
   "sparse": true,
-  "Job": true,
-  "ParentRef": { "value": "<the parent customer's QBO numeric Id>" },
   "CustomField": [
-    { "DefinitionId": "1000000019", "Name": "Residential or Commercial", "Type": "StringType", "StringValue": "Residential -Single Family" },
-    { "DefinitionId": "1000000027", "Name": "RSM", "Type": "StringType", "StringValue": "Trever" }
+    { "DefinitionId": "3", "Name": "Deposit Due", "Type": "StringType", "StringValue": "$100.00 TEST" },
+    { "DefinitionId": "1", "Name": "Q Number/PO #", "Type": "StringType", "StringValue": "TEST-Q1" }
   ]
 }
 ```
+actually set both values — confirmed by reading the estimate back afterward and seeing
+`"value":"TEST-Q1"` / `"value":"$100.00 TEST"`. n8n's built-in QuickBooks node also exposes these
+3 fields directly (`CustomFields.Field[].DefinitionId` + `StringValue`, with `DefinitionId`
+populated via a `getCustomFields` load-options call) — no HTTP Request node needed if you're
+using n8n and only need these 3 legacy fields.
 
-`Job: true` + `ParentRef` together are what the QBO UI's "Sub-customer/job of" checkbox actually
-sets. Note the QBO numeric Id here is the MCP tools' `local_id` field, not the long
-`djQuMTo...` wrapped ID those tools return as `id` — the wrapped ID is this integration's own
-encoding, not what the raw REST API expects.
+**2. Modern custom fields (Residential or Commercial, Dealer, RSM, 2nd RSM, Q#/Project,
+Customer PO, JDM Folder, Sales Tax Exempt, Lead Source — the `1000000019`-style ids) —
+CONFIRMED NOT WRITABLE via the same mechanism.** The same live test first tried writing
+`DefinitionId: "1000000019"` ("Residential or Commercial") and `"1000000027"` ("RSM") through the
+identical sparse-POST `CustomField` array. The call returned HTTP 200 and the SyncToken
+incremented, but the returned `Estimate.CustomField` array still contained only the legacy slot —
+the submitted modern fields were silently dropped, not rejected with an error and not applied.
+
+**Why**: the modern fields' own ids, as this MCP server returns them (e.g.
+`djQ6OTM0MTQ1NDU0NzUyNjQ0NjovY29tbW9uL0N1c3RvbUZpZWxkRGVmaW5pdGlvbjo6MTAwMDAwMDAxOQ`), decode to
+something like `v4:<companyId>:common/CustomFieldDefinition:1000000019` — a GraphQL-style global
+ID, not a classic REST resource id. This strongly suggests the modern custom fields platform is
+managed through Intuit's newer GraphQL layer (the same one this MCP server itself talks to),
+**not** the classic REST v3 API's `CustomField` array at all, which only ever recognizes the 3
+legacy numeric slots. Nothing tested so far can write the modern fields — not this MCP server's
+tools, not the classic REST API, not n8n's built-in QuickBooks node (whose `getCustomFields`
+picker only lists the 3 legacy fields, confirming even n8n's dedicated node doesn't see the modern
+ones). The only confirmed way to set them remains the QBO UI itself. If a real fix is ever found
+(e.g. a documented GraphQL mutation), record the exact request here.
+
+**Sub-customer nesting** (`ParentRef` + `Job: true`) has NOT been tested live — still unverified,
+same caveats as before. If picking this up again, follow the same pattern: GET for SyncToken,
+sparse POST, and actually read the result back to confirm rather than trusting a 200 response.
