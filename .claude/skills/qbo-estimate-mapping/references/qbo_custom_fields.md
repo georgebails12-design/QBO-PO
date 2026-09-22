@@ -50,3 +50,34 @@ human label shown in the QBO UI.
   workaround, and point the user to the QBO UI (Edit Customer → set "Sub-customer/job of" +
   parent company) or a direct QuickBooks REST API call (`Customer.ParentRef` + `Job: true`,
   and a `CustomField` array patch) as the only real options.
+
+## Worked example: the raw API call to set sub-customer + custom fields
+
+This is the request an n8n HTTP Request node (or Postman, or a script) would need, since no MCP
+tool here can do it. **Unverified — derived from Intuit's general Custom Fields API pattern, not
+executed against a live company.** Test on a single field first and confirm the response shape
+before batch-applying.
+
+1. `GET /v3/company/<realmId>/customer/<id>` first to read the current `SyncToken` — every QBO
+   update requires the record's current SyncToken or it's rejected.
+2. Sparse-update with the parent link and custom fields together:
+
+```json
+POST /v3/company/<realmId>/customer?minorversion=65
+{
+  "Id": "<the sub-customer's QBO numeric Id>",
+  "SyncToken": "<from step 1>",
+  "sparse": true,
+  "Job": true,
+  "ParentRef": { "value": "<the parent customer's QBO numeric Id>" },
+  "CustomField": [
+    { "DefinitionId": "1000000019", "Name": "Residential or Commercial", "Type": "StringType", "StringValue": "Residential -Single Family" },
+    { "DefinitionId": "1000000027", "Name": "RSM", "Type": "StringType", "StringValue": "Trever" }
+  ]
+}
+```
+
+`Job: true` + `ParentRef` together are what the QBO UI's "Sub-customer/job of" checkbox actually
+sets. Note the QBO numeric Id here is the MCP tools' `local_id` field, not the long
+`djQuMTo...` wrapped ID those tools return as `id` — the wrapped ID is this integration's own
+encoding, not what the raw REST API expects.
