@@ -98,23 +98,39 @@ using n8n and only need these 3 legacy fields.
 
 **2. Modern custom fields (Residential or Commercial, Dealer, RSM, 2nd RSM, Q#/Project,
 Customer PO, JDM Folder, Sales Tax Exempt, Lead Source — the `1000000019`-style ids) —
-CONFIRMED NOT WRITABLE via the same mechanism.** The same live test first tried writing
-`DefinitionId: "1000000019"` ("Residential or Commercial") and `"1000000027"` ("RSM") through the
-identical sparse-POST `CustomField` array. The call returned HTTP 200 and the SyncToken
-incremented, but the returned `Estimate.CustomField` array still contained only the legacy slot —
-the submitted modern fields were silently dropped, not rejected with an error and not applied.
+DID NOT WRITE in the live test, but NOT because of a different API shape.** The same live test
+tried writing `DefinitionId: "1000000019"` ("Residential or Commercial") and `"1000000027"`
+("RSM") through the identical sparse-POST `CustomField` array. The call returned HTTP 200 and the
+SyncToken incremented, but the returned `Estimate.CustomField` array still contained only the
+legacy slot — the submitted modern fields were silently dropped, not rejected with an error.
 
-**Why**: the modern fields' own ids, as this MCP server returns them (e.g.
-`djQ6OTM0MTQ1NDU0NzUyNjQ0NjovY29tbW9uL0N1c3RvbUZpZWxkRGVmaW5pdGlvbjo6MTAwMDAwMDAxOQ`), decode to
-something like `v4:<companyId>:common/CustomFieldDefinition:1000000019` — a GraphQL-style global
-ID, not a classic REST resource id. This strongly suggests the modern custom fields platform is
-managed through Intuit's newer GraphQL layer (the same one this MCP server itself talks to),
-**not** the classic REST v3 API's `CustomField` array at all, which only ever recognizes the 3
-legacy numeric slots. Nothing tested so far can write the modern fields — not this MCP server's
-tools, not the classic REST API, not n8n's built-in QuickBooks node (whose `getCustomFields`
-picker only lists the 3 legacy fields, confirming even n8n's dedicated node doesn't see the modern
-ones). The only confirmed way to set them remains the QBO UI itself. If a real fix is ever found
-(e.g. a documented GraphQL mutation), record the exact request here.
+**Root cause (per Intuit's own docs, not just inference from the test): missing OAuth scope, not
+a different endpoint.** Custom field *definitions* (schema/picklist options) are managed via the
+App Foundations GraphQL API (`https://qb.api.intuit.com/graphql`), but assigning a *value* to a
+transaction still goes through this same classic REST `CustomField` array — it just requires the
+OAuth token to carry the `app-foundations.custom-field-definitions` scope (or the `.read` variant
+for read-only) in addition to the standard `com.intuit.quickbooks.accounting` scope. n8n's
+registered Intuit app doesn't have that scope, which is exactly consistent with what we saw: QBO
+accepts the sparse POST but silently ignores any `CustomField` entry it doesn't recognize under
+the caller's granted scope, rather than erroring.
+
+**The actual fix**: someone with access to the Intuit Developer app behind the
+`quickBooksOAuth2Api` credential needs to (1) add the `app-foundations.custom-field-definitions`
+scope to that app in developer.intuit.com's settings, then (2) re-authorize the connection —
+**adding a scope to an already-authorized OAuth connection requires the company admin to go
+through the consent screen again**, it cannot be silently granted via the existing refresh token.
+Once re-authorized, retry the exact same sparse-POST request (workflow `1tF9QG7psykePj1t`) with
+no code changes — it should work once the scope is present. Supporting signal: this MCP server's
+own `qbo_sales_get_estimates` tool already reads these modern fields with full schema/picklist
+detail, meaning some Intuit app in this stack already holds at least the `.read` scope — so
+getting the write scope approved is a configuration change, not new infrastructure.
+
+Sources:
+- https://blogs.intuit.com/2025/12/01/custom-fields-api-extending-quickbooks-online-with-flexible-metadata/
+- https://help.developer.intuit.com/s/article/Enhanced-Custom-Fields-for-QuickBooks-Online-Advanced
+- https://help.developer.intuit.com/s/question/0D54R00007I7ImDSAV/custom-fields-in-quickbooks-online-api
+- https://github.com/IntuitDeveloper/Sampleapp-Customfields-Nodejs
+- https://www.erpag.com/news/erpag-api-intuit-quickbooks-online-oauth-2-0-authorization (scope reauthorization requirement)
 
 **Sub-customer nesting** (`ParentRef` + `Job: true` on the Customer entity) — **CONFIRMED WORKING**,
 tested live the same way (n8n workflow id `86wUImQUMLfMBTPy`): a sparse POST to
@@ -125,21 +141,5 @@ tested live the same way (n8n workflow id `86wUImQUMLfMBTPy`): a sparse POST to
 actually created the hierarchy — the response's `FullyQualifiedName` became `"Test:Test Project"`,
 and re-reading the estimate through `qbo_sales_get_estimates` confirmed `contact.display_name`
 also updated to `"Test:Test Project"`. So sub-customer/project creation IS automatable via the
-classic REST API — it's specifically the modern custom fields that aren't.
-
-### Why the modern fields aren't REST-writable (confirmed via Intuit's own docs, not just inference)
-
-A web search of Intuit's developer docs confirms the live-test result above: *"the QBO API
-supports only the first three string custom fields... With QuickBooks Online Advanced, customers
-can create up to 10 custom fields with various data types, but the standard REST API has
-limitations in accessing beyond the first three."* Intuit's own sample app for the modern fields
-(`IntuitDeveloper/Sampleapp-Customfields-Nodejs`) is built on **"the App Foundations GraphQL API,"
-not the REST Accounting API**. That matches the GraphQL-shaped global IDs this MCP server returns
-for the modern definitions. Getting write access to these 9 fields (Residential or Commercial,
-Dealer, Outside Sales Rep, RSM, 2nd RSM, Q#/Project, JDM Folder, Sales Tax Exempt, Lead Source)
-would require registering against that separate GraphQL/App Foundations platform — a different
-auth setup than the `quickBooksOAuth2Api` credential used for everything else here. Sources:
-- https://blogs.intuit.com/2025/12/01/custom-fields-api-extending-quickbooks-online-with-flexible-metadata/
-- https://help.developer.intuit.com/s/article/Enhanced-Custom-Fields-for-QuickBooks-Online-Advanced
-- https://help.developer.intuit.com/s/question/0D54R00007I7ImDSAV/custom-fields-in-quickbooks-online-api
-- https://github.com/IntuitDeveloper/Sampleapp-Customfields-Nodejs
+classic REST API — it's specifically the modern custom fields that need the additional scope
+described above.
