@@ -246,10 +246,15 @@ def api_items_create():
     with TOKEN_LOCK:
         qbo_client.get_valid_access_token()
     try:
+        category_id = qbo_client.find_item_category_id(category)
+        if not category_id:
+            return err(f'"{category}" is not a Product/Service Category in QuickBooks. Create it there '
+                       "(or fix the name on the Categories page) so new items land in it.")
         created = qbo_client.create_item(
             name=name, description=(data.get("description") or "").strip(), price=price,
             income_account_id=mapping["income_account"]["id"],
             expense_account_id=mapping["expense_account"]["id"],
+            category_id=category_id,
         )
     except qbo_client.QBOError as exc:
         return err(exc, 502)

@@ -282,8 +282,17 @@ def get_accounts(account_type=None):
     return [{"id": a["Id"], "name": a["Name"], "account_type": a.get("AccountType")} for a in rows]
 
 
-def create_item(name, description, price, income_account_id, expense_account_id, item_type="NonInventory"):
-    """Create a two-sided QBO Item (bought and sold) using the accounts mapped to its category."""
+def find_item_category_id(category_name):
+    """Id of the QBO Product/Service Category with this name, or None."""
+    escaped = category_name.replace("\\", "\\\\").replace("'", "\\'")
+    rows = _query(f"SELECT Id, Name FROM Item WHERE Type = 'Category' AND Name = '{escaped}'")
+    return rows[0]["Id"] if rows else None
+
+
+def create_item(name, description, price, income_account_id, expense_account_id, item_type="NonInventory",
+                category_id=None):
+    """Create a two-sided QBO Item (bought and sold) using the accounts mapped to its category.
+    category_id puts it inside that Product/Service Category (QBO models this as a sub-item)."""
     payload = {
         "Name": name,
         "Type": item_type,
@@ -295,6 +304,9 @@ def create_item(name, description, price, income_account_id, expense_account_id,
         "PurchaseDesc": description,
         "TrackQtyOnHand": False,
     }
+    if category_id:
+        payload["SubItem"] = True
+        payload["ParentRef"] = {"value": str(category_id)}
     data = _post("item", payload)
     item = data.get("Item", {})
     return {"id": item.get("Id"), "name": item.get("Name")}
