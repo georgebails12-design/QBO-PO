@@ -119,6 +119,21 @@ function loadCategories() {
 // ---------------------------------------------------------------------
 // Header fields
 // ---------------------------------------------------------------------
+// Fills Vendor Email from the vendor's primary email in QuickBooks. Uses the
+// cached list when it has one; otherwise (cache built before emails were
+// cached, or email added in QBO since) asks QuickBooks directly.
+function loadVendorEmail(vendor) {
+  const emailInput = document.getElementById('vendor-email');
+  emailInput.value = vendor.email || '';
+  if (vendor.email) return;
+  const vendorId = vendor.id;
+  api(`/api/vendors/${encodeURIComponent(vendorId)}/email`).then((data) => {
+    if (state.vendorId !== vendorId) return;  // vendor changed while loading
+    vendor.email = data.email || '';
+    emailInput.value = vendor.email;
+  }).catch(() => {});
+}
+
 function setupHeader() {
   document.getElementById('po-date').value = new Date().toISOString().slice(0, 10);
 
@@ -126,9 +141,12 @@ function setupHeader() {
     input: document.getElementById('vendor-input'),
     box: document.getElementById('vendor-suggestions'),
     source: () => state.vendors, filter: vendorFilter, render: (v) => v.name,
-    onPick: (v) => { state.vendorId = v.id; document.getElementById('vendor-input').value = v.name; },
+    onPick: (v) => { state.vendorId = v.id; document.getElementById('vendor-input').value = v.name; loadVendorEmail(v); },
   });
-  document.getElementById('vendor-input').addEventListener('input', () => { state.vendorId = null; });
+  document.getElementById('vendor-input').addEventListener('input', () => {
+    state.vendorId = null;
+    document.getElementById('vendor-email').value = '';
+  });
 
   attachTypeahead({
     input: document.getElementById('header-customer-input'),
@@ -606,6 +624,7 @@ function setupSubmit() {
         txn_date: document.getElementById('po-date').value,
         q_project: document.getElementById('q-project').value.trim(),
         doc_number: poNumber,
+        po_email: document.getElementById('vendor-email').value.trim(),
       }),
     }).then((result) => {
       if (!state.pendingAttachments.length) {

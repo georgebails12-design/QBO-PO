@@ -224,8 +224,18 @@ def get_company_info():
 # Vendors / Items / Accounts
 # ---------------------------------------------------------------------------
 def get_vendors():
-    rows = _query("SELECT Id, DisplayName, CompanyName, Active FROM Vendor WHERE Active = true ORDER BY DisplayName")
-    return [{"id": v["Id"], "name": v.get("DisplayName") or v.get("CompanyName")} for v in rows]
+    rows = _query("SELECT * FROM Vendor WHERE Active = true ORDER BY DisplayName")
+    return [{
+        "id": v["Id"],
+        "name": v.get("DisplayName") or v.get("CompanyName"),
+        "email": (v.get("PrimaryEmailAddr") or {}).get("Address", ""),
+    } for v in rows]
+
+
+def get_vendor_email(vendor_id):
+    """Live lookup of one vendor's primary email (the cached vendor list can predate it)."""
+    vendor = _get(f"vendor/{vendor_id}").get("Vendor", {})
+    return (vendor.get("PrimaryEmailAddr") or {}).get("Address", "")
 
 
 def get_items():
@@ -313,7 +323,7 @@ def suggest_next_po_number():
 
 def create_purchase_order(
     vendor_id, item_lines=None, category_lines=None, memo=None, txn_date=None,
-    ship_to_addr=None, q_project=None, doc_number=None,
+    ship_to_addr=None, q_project=None, doc_number=None, po_email=None,
 ):
     """
     item_lines: list of {"item_id", "description", "qty", "unit_price", "customer_id"?}
@@ -353,6 +363,8 @@ def create_purchase_order(
     }
     if doc_number:
         payload["DocNumber"] = str(doc_number)
+    if po_email:
+        payload["POEmail"] = {"Address": po_email}
     if memo:
         payload["PrivateNote"] = memo
     if txn_date:
@@ -510,6 +522,7 @@ def format_purchase_order(po):
         "doc_number": po.get("DocNumber"),
         "vendor": po.get("VendorRef", {}).get("name"),
         "vendor_id": po.get("VendorRef", {}).get("value"),
+        "po_email": (po.get("POEmail") or {}).get("Address", ""),
         "txn_date": po.get("TxnDate"),
         "memo": po.get("PrivateNote", ""),
         "q_project": q_project,

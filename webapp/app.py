@@ -278,6 +278,17 @@ def api_po_number_suggest():
         return err(exc, 502)
 
 
+@app.route("/api/vendors/<vendor_id>/email")
+@auth.login_required
+def api_vendor_email(vendor_id):
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        return jsonify({"email": qbo_client.get_vendor_email(vendor_id)})
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+
+
 @app.route("/api/purchase-order", methods=["POST"])
 @auth.login_required
 def api_purchase_order_create():
@@ -297,6 +308,7 @@ def api_purchase_order_create():
             vendor_id=vendor_id, item_lines=item_lines, category_lines=category_lines,
             memo=data.get("memo") or None, txn_date=data.get("txn_date") or None,
             q_project=data.get("q_project") or None, doc_number=data.get("doc_number") or None,
+            po_email=(data.get("po_email") or "").strip() or None,
         )
     except qbo_client.QBOError as exc:
         return err(exc, 502)
