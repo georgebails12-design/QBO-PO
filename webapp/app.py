@@ -34,8 +34,36 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_DIR = os.path.join(APP_DIR, "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+SECRET_KEY_FILE = os.path.join(APP_DIR, "flask_secret_key")
+
+
+def load_secret_key():
+    """FLASK_SECRET_KEY if set; otherwise a key persisted to flask_secret_key
+    (gitignored) so sessions survive restarts and are shared by every WSGI
+    worker. A per-process random key would make logins randomly fail with
+    "Not logged in." whenever a request hit a different worker/restart."""
+    env_key = os.environ.get("FLASK_SECRET_KEY")
+    if env_key:
+        return env_key
+    try:
+        fd = os.open(SECRET_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        # Another worker may have created the file but not written it yet.
+        for _ in range(20):
+            with open(SECRET_KEY_FILE, "r", encoding="utf-8") as f:
+                key = f.read().strip()
+            if key:
+                return key
+            time.sleep(0.1)
+        raise RuntimeError(f"{SECRET_KEY_FILE} is empty -- delete it and restart.")
+    key = secrets.token_hex(32)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(key)
+    return key
+
+
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+app.secret_key = load_secret_key()
 app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 12  # 12 hours
 
 TOKEN_LOCK = threading.Lock()  # serialize QBO token refreshes across concurrent users

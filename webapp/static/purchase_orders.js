@@ -9,6 +9,11 @@ function api(path, opts) {
   return fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts))
     .then(async (res) => {
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        // Session expired: log in again in a new tab so nothing typed on this page is lost.
+        window.open('/login', '_blank');
+        throw new Error('Your login expired. Log in again in the new tab, then retry here -- nothing on this page was lost.');
+      }
       if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
       return data;
     });

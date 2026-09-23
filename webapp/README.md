@@ -53,8 +53,9 @@ nothing breaks either way.
 
 2. **Set `FLASK_SECRET_KEY`** in the environment to a long random value
    (e.g. `python -c "import secrets; print(secrets.token_hex(32))"`).
-   Without it, a random key is generated on every restart, which logs
-   everyone out each time the process restarts.
+   Without it, a key is generated once and saved to `flask_secret_key`
+   (gitignored) next to `app.py`, so logins survive restarts and are shared
+   by every worker. Delete that file to force everyone to log in again.
 
 3. **Put a reverse proxy in front** (nginx, or Hostinger's own site
    config) that terminates HTTPS and forwards to `127.0.0.1:5050`. Never
