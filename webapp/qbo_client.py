@@ -224,8 +224,18 @@ def get_company_info():
 # Vendors / Items / Accounts
 # ---------------------------------------------------------------------------
 def get_vendors():
-    rows = _query("SELECT Id, DisplayName, CompanyName, Active FROM Vendor WHERE Active = true ORDER BY DisplayName")
-    return [{"id": v["Id"], "name": v.get("DisplayName") or v.get("CompanyName")} for v in rows]
+    rows = _query("SELECT * FROM Vendor WHERE Active = true ORDER BY DisplayName")
+    return [{
+        "id": v["Id"],
+        "name": v.get("DisplayName") or v.get("CompanyName"),
+        "email": (v.get("PrimaryEmailAddr") or {}).get("Address", ""),
+    } for v in rows]
+
+
+def get_vendor_email(vendor_id):
+    """Live lookup of one vendor's primary email (the cached vendor list can predate it)."""
+    vendor = _get(f"vendor/{vendor_id}").get("Vendor", {})
+    return (vendor.get("PrimaryEmailAddr") or {}).get("Address", "")
 
 
 def get_items():
@@ -272,8 +282,17 @@ def get_accounts(account_type=None):
     return [{"id": a["Id"], "name": a["Name"], "account_type": a.get("AccountType")} for a in rows]
 
 
-def create_item(name, description, price, income_account_id, expense_account_id, item_type="NonInventory"):
-    """Create a two-sided QBO Item (bought and sold) using the accounts mapped to its category."""
+def find_item_category_id(category_name):
+    """Id of the QBO Product/Service Category with this name, or None."""
+    escaped = category_name.replace("\\", "\\\\").replace("'", "\\'")
+    rows = _query(f"SELECT Id, Name FROM Item WHERE Type = 'Category' AND Name = '{escaped}'")
+    return rows[0]["Id"] if rows else None
+
+
+def create_item(name, description, price, income_account_id, expense_account_id, item_type="NonInventory",
+                category_id=None):
+    """Create a two-sided QBO Item (bought and sold) using the accounts mapped to its category.
+    category_id puts it inside that Product/Service Category (QBO models this as a sub-item)."""
     payload = {
         "Name": name,
         "Type": item_type,
@@ -285,6 +304,9 @@ def create_item(name, description, price, income_account_id, expense_account_id,
         "PurchaseDesc": description,
         "TrackQtyOnHand": False,
     }
+    if category_id:
+        payload["SubItem"] = True
+        payload["ParentRef"] = {"value": str(category_id)}
     data = _post("item", payload)
     item = data.get("Item", {})
     return {"id": item.get("Id"), "name": item.get("Name")}
@@ -313,7 +335,7 @@ def suggest_next_po_number():
 
 def create_purchase_order(
     vendor_id, item_lines=None, category_lines=None, memo=None, txn_date=None,
-    ship_to_addr=None, q_project=None, doc_number=None,
+    ship_to_addr=None, q_project=None, doc_number=None, po_email=None,
 ):
     """
     item_lines: list of {"item_id", "description", "qty", "unit_price", "customer_id"?}
@@ -353,6 +375,8 @@ def create_purchase_order(
     }
     if doc_number:
         payload["DocNumber"] = str(doc_number)
+    if po_email:
+        payload["POEmail"] = {"Address": po_email}
     if memo:
         payload["PrivateNote"] = memo
     if txn_date:
@@ -510,6 +534,7 @@ def format_purchase_order(po):
         "doc_number": po.get("DocNumber"),
         "vendor": po.get("VendorRef", {}).get("name"),
         "vendor_id": po.get("VendorRef", {}).get("value"),
+        "po_email": (po.get("POEmail") or {}).get("Address", ""),
         "txn_date": po.get("TxnDate"),
         "memo": po.get("PrivateNote", ""),
         "q_project": q_project,

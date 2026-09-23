@@ -34,8 +34,36 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_DIR = os.path.join(APP_DIR, "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+SECRET_KEY_FILE = os.path.join(APP_DIR, "flask_secret_key")
+
+
+def load_secret_key():
+    """FLASK_SECRET_KEY if set; otherwise a key persisted to flask_secret_key
+    (gitignored) so sessions survive restarts and are shared by every WSGI
+    worker. A per-process random key would make logins randomly fail with
+    "Not logged in." whenever a request hit a different worker/restart."""
+    env_key = os.environ.get("FLASK_SECRET_KEY")
+    if env_key:
+        return env_key
+    try:
+        fd = os.open(SECRET_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        # Another worker may have created the file but not written it yet.
+        for _ in range(20):
+            with open(SECRET_KEY_FILE, "r", encoding="utf-8") as f:
+                key = f.read().strip()
+            if key:
+                return key
+            time.sleep(0.1)
+        raise RuntimeError(f"{SECRET_KEY_FILE} is empty -- delete it and restart.")
+    key = secrets.token_hex(32)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(key)
+    return key
+
+
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+app.secret_key = load_secret_key()
 app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 12  # 12 hours
 
 TOKEN_LOCK = threading.Lock()  # serialize QBO token refreshes across concurrent users
@@ -218,10 +246,15 @@ def api_items_create():
     with TOKEN_LOCK:
         qbo_client.get_valid_access_token()
     try:
+        category_id = qbo_client.find_item_category_id(category)
+        if not category_id:
+            return err(f'"{category}" is not a Product/Service Category in QuickBooks. Create it there '
+                       "(or fix the name on the Categories page) so new items land in it.")
         created = qbo_client.create_item(
             name=name, description=(data.get("description") or "").strip(), price=price,
             income_account_id=mapping["income_account"]["id"],
             expense_account_id=mapping["expense_account"]["id"],
+            category_id=category_id,
         )
     except qbo_client.QBOError as exc:
         return err(exc, 502)
@@ -250,6 +283,17 @@ def api_po_number_suggest():
         return err(exc, 502)
 
 
+@app.route("/api/vendors/<vendor_id>/email")
+@auth.login_required
+def api_vendor_email(vendor_id):
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        return jsonify({"email": qbo_client.get_vendor_email(vendor_id)})
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+
+
 @app.route("/api/purchase-order", methods=["POST"])
 @auth.login_required
 def api_purchase_order_create():
@@ -269,6 +313,7 @@ def api_purchase_order_create():
             vendor_id=vendor_id, item_lines=item_lines, category_lines=category_lines,
             memo=data.get("memo") or None, txn_date=data.get("txn_date") or None,
             q_project=data.get("q_project") or None, doc_number=data.get("doc_number") or None,
+            po_email=(data.get("po_email") or "").strip() or None,
         )
     except qbo_client.QBOError as exc:
         return err(exc, 502)

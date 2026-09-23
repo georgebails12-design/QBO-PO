@@ -11,3 +11,6 @@ downloads/
 
 __pycache__/
 *.pyc
+
+# Persisted Flask session key -- never commit
+flask_secret_key
