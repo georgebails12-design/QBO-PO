@@ -64,8 +64,9 @@ body {
   font-size: 14px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text);
   font-weight: 400;
 }
+.field.po-field { flex: 0 0 230px; min-width: 200px; }
 .po-number-row { display: flex; gap: 6px; }
-.po-number-row input { flex: 1; }
+.po-number-row input { flex: 1; min-width: 0; }
 
 .typeahead { position: relative; }
 .typeahead input { width: 100%; }
@@ -132,5 +133,5 @@ dialog h2 { margin: 0 0 12px; font-size: 16px; }
 
 @media (max-width: 640px) {
   .field-row { flex-direction: column; }
-  .field, .field.small, .field.wide { flex: 1 1 auto; min-width: 0; }
+  .field, .field.small, .field.wide, .field.po-field { flex: 1 1 auto; min-width: 0; }
 }
