@@ -1,5 +1,7 @@
 # QBO master field list: Customer → Project → Estimate
 
+> **Superseded:** the current list is `qbo_customer_project_estimate_fields.xlsx`. It was narrowed to what estimates 11183, 11172, 11179, 11155 and 11135 actually use, and includes a side-by-side comparison tab.
+
 Built from the n8n workflows on 2026-09-24:
 
 - **QBO - Master Field List Probe (read-only)** (`TcfDrNFUzcyf7vLa`, execution 103): company Preferences, the 10 newest Estimates and the 10 newest Customers.
