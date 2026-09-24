@@ -30,8 +30,10 @@ from flask import Flask, Response, jsonify, redirect, render_template, request, 
 
 import auth
 import cardinal_glass_output
+import fillout
 import form_key
 import glass_pdf_parser
+import lookup
 import po_requests
 import qbo_client
 
@@ -428,7 +430,7 @@ def api_requests_create():
     similar = po_requests.find_similar_requests(fields)
     if similar and not data.get("confirm_duplicate"):
         return jsonify({"error": "This looks like a request that's already in.", "duplicates": similar}), 409
-    return jsonify(po_requests.add_request(fields, auth.current_user()["username"]))
+    return jsonify(po_requests.add_request(fields, auth.current_user()["username"])[0])
 
 
 @app.route("/api/requests/<int:number>")
@@ -524,12 +526,97 @@ def api_request_form_submit():
         if too_big:
             return err(f'"{f.filename}" is too large (25MB limit per file).')
 
-    req = po_requests.add_request(fields, f"{fields['requester_name']} (form)")
+    lookup.resolve_request(fields)
+    req, _created = po_requests.add_request(fields, f"{fields['requester_name']} (form)")
     try:
         po_requests.save_attachments(req["number"], files)
     except (OSError, ValueError) as exc:
         return err(f"Request #{req['number']} was received, but attaching files failed: {exc}", 500)
     return jsonify({"number": req["number"]})
+
+
+def _link_key():
+    """The form key from ?key= or an X-Form-Key header (Fillout webhooks can send either)."""
+    return request.args.get("key") or request.headers.get("X-Form-Key")
+
+
+@app.route("/api/fillout-webhook", methods=["POST"])
+def api_fillout_webhook():
+    """A Fillout submission -> a request in the review table. Never creates a
+    PO. Replies 200 even when a file can't be fetched, so Fillout doesn't
+    keep retrying a submission that's already in the table."""
+    if not form_key.key_ok(_link_key()):
+        return err("Invalid form key.", 403)
+    payload = request.get_json(force=True, silent=True)
+    if not isinstance(payload, dict):
+        return err("Expected a JSON body.")
+    external_id, data, file_refs = fillout.parse(payload)
+    fields = po_requests.clean_request(data, source="fillout")
+    fields["external_id"] = external_id
+    lookup.resolve_request(fields)
+    who = fields["requester_name"] or fields["requester_email"] or "Fillout"
+    req, created = po_requests.add_request(fields, f"{who} (Fillout)")
+    if not created:
+        return jsonify({"number": req["number"], "duplicate": True})
+
+    files, problems = [], []
+    for url, name in file_refs[:po_requests.MAX_FILES]:
+        try:
+            files.append(fillout.download(url, name, po_requests.MAX_FILE_BYTES))
+        except (ValueError, requests.RequestException) as exc:
+            problems.append(f"{name or url}: {exc}")
+    if files:
+        po_requests.save_attachment_bytes(req["number"], files)
+    if problems:
+        po_requests.update_request(req["number"], note="Files not downloaded from Fillout: " + "; ".join(problems))
+    return jsonify({"number": req["number"], "files": len(files), "file_problems": problems})
+
+
+# ---------------------------------------------------------------------------
+# Read-only QuickBooks lookup for the Fillout form / anyone with the form
+# key: names only (no emails, prices or costs), from the cached lists --
+# nothing here calls QuickBooks or can change it. See lookup.py.
+# ---------------------------------------------------------------------------
+def _lookup_json(payload, code=200):
+    resp = jsonify(payload)
+    resp.status_code = code
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/lookup")
+def lookup_page():
+    if not form_key.key_ok(_link_key()):
+        return render_template("link_denied.html"), 403
+    return render_template("lookup.html", key=_link_key())
+
+
+@app.route("/api/lookup/check")
+def api_lookup_check():
+    if not form_key.key_ok(_link_key()):
+        return _lookup_json({"error": "Invalid form key."}, 403)
+    results = {}
+    for kind in lookup.KINDS:
+        if request.args.get(kind):
+            r = lookup.check(kind, request.args[kind])
+            results[kind] = {k: r[k] for k in ("value", "found", "match", "suggestions")}
+    return _lookup_json({"results": results, "fetched_at": lookup.cache_age()})
+
+
+@app.route("/api/lookup/<kind>")
+def api_lookup_search(kind):
+    """Names for a dropdown or type-ahead. ?q= filters (empty = everything,
+    for filling a whole dropdown); ?format=names returns plain strings."""
+    if not form_key.key_ok(_link_key()):
+        return _lookup_json({"error": "Invalid form key."}, 403)
+    if kind not in lookup.KINDS:
+        return _lookup_json({"error": f"Unknown list -- use one of {', '.join(lookup.KINDS)}."}, 404)
+    query = request.args.get("q", "")
+    hits = lookup.search(kind, query) if query.strip() else lookup.all_names(kind)
+    if request.args.get("format") == "names":
+        return _lookup_json([h["name"] for h in hits])
+    return _lookup_json([{"label": h["name"], "value": h["name"]} for h in hits])
 
 
 # ---------------------------------------------------------------------------

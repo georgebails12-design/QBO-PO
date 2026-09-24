@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuickBooks Name Check - Panda Windows &amp; Doors</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main class="page form-page">
+  <div class="card">
+    <h1 class="form-title">Is it in QuickBooks?</h1>
+    <p class="hint">Start typing a vendor, item or project to see the exact name QuickBooks uses. Read-only -- nothing here changes QuickBooks.</p>
+    {% for kind, label in [("vendor", "Vendor"), ("item", "Item"), ("project", "Project name")] %}
+    <div class="lk-row">
+      <label class="field">
+        <span>{{ label }}</span>
+        <div class="typeahead">
+          <input type="text" id="lk-{{ kind }}" data-kind="{{ kind }}" autocomplete="off">
+          <div class="suggestions" id="lk-{{ kind }}-suggestions"></div>
+        </div>
+      </label>
+      <div class="lk-result" id="lk-{{ kind }}-result"></div>
+    </div>
+    {% endfor %}
+    <p class="hint" id="lk-age"></p>
+  </div>
+</main>
+<script>const FORM_KEY = {{ key | tojson }};</script>
+<script src="{{ url_for('static', filename='lookup.js') }}"></script>
+</body>
+</html>

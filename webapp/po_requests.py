@@ -90,16 +90,20 @@ def _num(value, default=0.0):
         return default
 
 
-def clean_request(data, public=False):
+def clean_request(data, public=False, source=None):
     """Validates a submitted form and returns the fields we store, or raises
     ValueError with a message safe to show on the page. public: the no-login
     request form -- vendor is typed text (matched to QuickBooks on review)
-    and the requester's name and email are required."""
+    and the requester's name and email are required. source="fillout": a
+    Fillout webhook -- typed text like public, but nothing is required, so
+    a submission is never thrown away; the reviewer sorts out what's
+    missing in the table."""
+    lenient = source == "fillout"
     vendor_id = str(data.get("vendor_id") or "").strip() or None
     vendor_name = (data.get("vendor_name") or "").strip()
-    if public:
+    if public or lenient:
         vendor_id = None
-        if not vendor_name:
+        if not vendor_name and not lenient:
             raise ValueError("Enter the vendor.")
     elif not vendor_id or not vendor_name:
         raise ValueError("Pick a vendor from the list.")
@@ -119,18 +123,20 @@ def clean_request(data, public=False):
         if not (item_id or item_name or description):
             continue
         qty = _num(line.get("qty"), 1.0)
+        if qty <= 0 and lenient:
+            qty = 1.0
         if qty <= 0:
             raise ValueError(f'Quantity must be more than 0 ("{item_name or description}").')
         lines.append({
             "item_id": item_id, "item_name": item_name, "description": description,
             "qty": qty, "rate": max(_num(line.get("rate")), 0.0),
         })
-    if not lines:
+    if not lines and not lenient:
         raise ValueError("Add at least one line.")
 
     customer = data.get("customer") or {}
     return {
-        "source": "form" if public else "app",
+        "source": source or ("form" if public else "app"),
         "vendor_id": vendor_id,
         "vendor_name": vendor_name,
         "customer": {"id": str(customer.get("id") or "") or None, "name": (customer.get("name") or "").strip()},
@@ -162,15 +168,22 @@ def get_request(number):
 
 
 def add_request(fields, submitted_by):
+    """Stores a new request and returns (request, created). A request with the
+    same external_id (a Fillout submission id) is returned instead of adding
+    a second one, since webhooks can be retried."""
     with _locked():
         data = _load()
+        external_id = fields.get("external_id")
+        existing = next((r for r in data["requests"] if external_id and r.get("external_id") == external_id), None)
+        if existing:
+            return existing, False
         req = dict(fields, number=data["next_number"], status="open", submitted_by=submitted_by,
                    submitted_at=time.time(), reviewed_by=None, reviewed_at=None,
                    po_id=None, po_doc_number=None, note="")
         data["next_number"] += 1
         data["requests"].append(req)
         _save(data)
-    return req
+    return req, True
 
 
 def update_request(number, **changes):
@@ -204,6 +217,21 @@ def save_attachments(number, files):
             raise ValueError(f'"{f.filename}" is too large (25MB limit per file).')
         saved.append({"file_name": f.filename, "stored_name": stored_name, "size": size,
                       "content_type": f.mimetype or "application/octet-stream"})
+    return update_request(number, attachments=saved)
+
+
+def save_attachment_bytes(number, files):
+    """Stores already-downloaded files [(file name, content type, bytes)]
+    (e.g. from a Fillout submission) and records them on the request."""
+    folder = os.path.join(UPLOAD_DIR, str(number))
+    os.makedirs(folder, exist_ok=True)
+    saved = []
+    for i, (file_name, content_type, content) in enumerate(files[:MAX_FILES]):
+        stored_name = f"{i}_{secure_filename(file_name) or 'file'}"
+        with open(os.path.join(folder, stored_name), "wb") as f:
+            f.write(content)
+        saved.append({"file_name": file_name, "stored_name": stored_name, "size": len(content),
+                      "content_type": content_type or "application/octet-stream"})
     return update_request(number, attachments=saved)
 
 
@@ -250,7 +278,8 @@ def _same_vendor(a, b):
     """Form requests only have the vendor's name, not its QuickBooks id."""
     if a.get("vendor_id") and b.get("vendor_id"):
         return a["vendor_id"] == b["vendor_id"]
-    return _norm(a.get("vendor_name")) == _norm(b.get("vendor_name"))
+    name = _norm(a.get("vendor_name"))
+    return bool(name) and name == _norm(b.get("vendor_name"))
 
 
 def _match_reasons(q_project, keys, other_q_project, other_keys):

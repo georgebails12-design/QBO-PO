@@ -210,6 +210,13 @@ function itemsSummary(req) {
   return req.lines.map((l) => `${l.qty} × ${[l.item_name, l.description].filter(Boolean).join(' -- ')}`);
 }
 
+// Typed-in requests (web form / Fillout) are checked against QuickBooks on arrival.
+function notInQb(result) {
+  if (!result || result.found) return '';
+  const hint = result.suggestions && result.suggestions.length ? `Closest: ${result.suggestions.join(', ')}` : '';
+  return ` <span class="badge-miss" title="${escapeHtml(hint)}">not in QB</span>`;
+}
+
 function renderQueue() {
   const words = document.getElementById('rq-search').value.toLowerCase().split(/\s+/).filter(Boolean);
   const shown = rq.list.filter((req) => {
@@ -225,18 +232,19 @@ function renderQueue() {
   shown.forEach((req) => {
     const tr = document.createElement('tr');
     tr.className = 'clickable-row';
-    const name = (req.submitted_by || '').replace(/ \(form\)$/, '');
+    const name = (req.submitted_by || '').replace(/ \((form|Fillout)\)$/, '');
+    const qb = req.qbo_check || {};
     const late = req.status === 'open' && req.needed_by && req.needed_by < today;
     const files = (req.attachments || []).length;
     tr.innerHTML = `<td><div class="rq-actions"></div></td>
       <td>${req.number}</td>
       <td class="nowrap">${new Date(req.submitted_at * 1000).toLocaleDateString()}</td>
       <td>${escapeHtml(name)}${req.requester_email ? `<br><a href="mailto:${escapeHtml(req.requester_email)}" class="hint">${escapeHtml(req.requester_email)}</a>` : ''}</td>
-      <td>${escapeHtml(req.vendor_name)}</td>
-      <td>${escapeHtml(req.q_project)}</td>
+      <td>${escapeHtml(req.vendor_name)}${notInQb(qb.vendor)}</td>
+      <td>${escapeHtml(req.q_project)}${notInQb(qb.project)}</td>
       <td>${escapeHtml(req.location)}</td>
       <td class="nowrap${late ? ' late' : ''}">${escapeHtml(req.needed_by)}</td>
-      <td class="rq-items">${itemsSummary(req).map(escapeHtml).join('<br>')}</td>
+      <td class="rq-items">${itemsSummary(req).map((t, i) => escapeHtml(t) + notInQb((qb.items || [])[i])).join('<br>')}</td>
       <td class="rq-notes">${escapeHtml(req.memo)}</td>
       <td>${files || ''}</td>
       <td>${statusLabel(req)}</td>`;
@@ -284,6 +292,14 @@ function renderDetail(req) {
   ];
   if (req.status === 'converted') facts.push(['Turned into', `PO ${req.po_doc_number || req.po_id} by ${req.reviewed_by}`]);
   if (req.status === 'rejected') facts.push(['Rejected', `by ${req.reviewed_by}${req.note ? `: ${req.note}` : ''}`]);
+  else if (req.note) facts.push(['Note', req.note]);
+  const qb = req.qbo_check || {};
+  [['vendor', 'Vendor'], ['project', 'Project']].forEach(([kind, label]) => {
+    const r = qb[kind];
+    if (r && !r.found) {
+      facts.push([`${label} not in QuickBooks`, r.suggestions.length ? `closest: ${r.suggestions.join(', ')}` : 'no close match']);
+    }
+  });
   document.getElementById('rq-detail-summary').innerHTML = facts
     .filter(([, v]) => v)
     .map(([k, v]) => `<div><span class="hint">${k}</span> ${escapeHtml(v)}</div>`).join('')

@@ -1,0 +1,14 @@
+{
+  "_help": "Which Fillout question labels feed which request field. Labels match ignoring case, punctuation and a trailing *. Add your form's exact labels to the right list if a field comes through empty.",
+  "requester_name": ["name", "your name", "full name", "requested by", "requester", "submitted by"],
+  "requester_email": ["email", "your email", "email address", "requester email"],
+  "vendor_name": ["vendor", "vendor name", "supplier", "supplier name"],
+  "q_project": ["project", "project name", "job", "job name", "q", "q project", "q number", "customer project"],
+  "location": ["location", "jobsite", "job site", "address", "delivery location", "delivery address", "ship to"],
+  "needed_by": ["needed by", "need by", "date needed", "needed date", "required by", "due date"],
+  "memo": ["notes", "note", "comments", "additional notes", "special instructions"],
+  "item_name": ["item", "items", "item name", "product", "products", "material", "materials"],
+  "description": ["description", "details", "item details", "item description", "size", "specs"],
+  "qty": ["qty", "quantity", "how many"],
+  "files": ["attachments", "attachment", "files", "file", "file upload", "upload", "photos", "documents"]
+}

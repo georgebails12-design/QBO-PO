@@ -160,3 +160,52 @@ Delete `form_key` and restart the app to revoke it and get a new one. The
 key file and the uploaded files (`request_uploads/`) are gitignored and
 deploys never overwrite them. You can set `PO_FORM_KEY` in the environment
 instead.
+
+## Connecting the Fillout form
+
+Both connections use the same form key as `/request-form` (print it with
+`python form_key.py https://po.pandawd.online`). Anyone with the key can
+see QuickBooks vendor, item and customer/project **names** and can send
+requests into the review table. Nothing else is exposed: no emails,
+prices or costs. Nothing through these links creates POs or changes
+QuickBooks.
+
+### Fillout → review table (webhook)
+
+In the Fillout form, go to **Integrate → Webhook** and set:
+- **URL:** `https://po.pandawd.online/api/fillout-webhook?key=<form key>`
+  (or put the key in an `X-Form-Key` header instead of the URL)
+- **Method:** POST
+- **Body:** the standard payload
+
+Each submission then appears in **Requests to Review**, marked
+"Name (Fillout)":
+- **QuickBooks matching:** vendor, project and item names are checked
+  against QuickBooks when the submission arrives. Exact matches (ignoring
+  case and punctuation) are filled in; anything else is flagged
+  **not in QB** in the table, with the closest names.
+- **Files:** uploads are downloaded from Fillout and attached to the PO
+  when it's created. Only public https links are fetched.
+- **Retries:** a retried webhook doesn't create a second request.
+
+Questions are matched to fields by their label, using
+`fillout_fields.json`. If a field arrives empty, add your form's exact
+label to the right list there. The item question can be:
+- one item plus Quantity/Details questions;
+- a multi-select;
+- several lines of text (one item per line);
+- a table whose columns are named like the item, details and quantity
+  fields.
+
+### QuickBooks names → Fillout (read-only)
+
+- **Name check page:**
+  `https://po.pandawd.online/lookup?key=<form key>` shows whether a
+  vendor, item or project is in QuickBooks, with suggestions as you type.
+  Add `&vendor=...&item=...&project=...` to check values straight away,
+  e.g. from a link or the form's ending page using Fillout's @-mentions.
+- **Dropdown lists:**
+  `https://po.pandawd.online/api/lookup/<vendor|item|project>?key=<form key>`
+  returns every name as `[{"label", "value"}]`. `&q=...` filters the list,
+  and `&format=names` returns plain strings. Use this if your Fillout plan
+  can load dropdown options from a URL.

@@ -693,6 +693,10 @@ function fillFromRequest(req) {
     if (item) {
       row.itemId = item.id;
       row.itemInput.value = item.name;
+      if (!line.rate) {
+        const cost = item.purchase_cost != null ? item.purchase_cost : item.unit_price;
+        line.rate = typeof cost === 'number' ? cost : 0;
+      }
     } else {
       row.itemInput.value = line.item_name || '';
       row.itemInput.classList.add('needs-pick');
