@@ -32,6 +32,7 @@
         <option value="">All</option>
       </select>
       <a class="btn-secondary btn-link" id="rq-export" href="/api/requests.csv?status=open">Export CSV</a>
+      <button type="button" class="btn-secondary btn-link" id="rq-sync-btn">Refresh from monday</button>
     </div>
   </div>
   <p class="hint">Nothing here is in QuickBooks yet. <strong>Push to PO</strong> opens the purchase order form filled in from the request so you can check it before creating it.</p>
@@ -45,6 +46,7 @@
     </table>
   </div>
   <p class="status-line" id="rq-list-status"></p>
+  <p class="status-line" id="rq-sync-status"></p>
 </div>
 
 <details class="card rq-add">

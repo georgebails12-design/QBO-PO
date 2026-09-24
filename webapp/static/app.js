@@ -581,6 +581,7 @@ function setupSubmit() {
         request_number: state.requestNumber,
       }),
     }).then((result) => {
+      if (result.monday_error) alert(`The PO was created, but monday wasn't updated: ${result.monday_error}\nIt will be retried on the next sync.`);
       const fromRequest = result.request_attachments;
       if (fromRequest && fromRequest.errors.length) {
         alert(`These files from the request could not be attached to the PO:\n${fromRequest.errors.join('\n')}\n`
@@ -676,7 +677,7 @@ function fillFromRequest(req) {
   }
 
   document.getElementById('q-project').value = req.q_project || '';
-  const memo = [req.memo];
+  const memo = [(req.memo || '').replace(/\s*\n+\s*/g, ' | ')];
   if (req.location) memo.push(`Location: ${req.location}`);
   if (req.requester_email) memo.push(`Requested by ${req.requester_name} <${req.requester_email}>`);
   document.getElementById('memo').value = memo.filter(Boolean).join(' | ');

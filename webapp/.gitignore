@@ -22,3 +22,6 @@ flask_secret_key
 # Public request form: link key and files people attach -- never commit
 form_key
 request_uploads/
+
+# n8n API key for the monday request sync -- never commit
+n8n_api_key

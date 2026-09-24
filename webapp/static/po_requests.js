@@ -232,12 +232,15 @@ function renderQueue() {
   shown.forEach((req) => {
     const tr = document.createElement('tr');
     tr.className = 'clickable-row';
-    const name = (req.submitted_by || '').replace(/ \((form|Fillout)\)$/, '');
+    const name = (req.submitted_by || '').replace(/ \((form|Fillout|monday)\)$/, '');
     const qb = req.qbo_check || {};
     const late = req.status === 'open' && req.needed_by && req.needed_by < today;
-    const files = (req.attachments || []).length;
+    const files = (req.attachments || []).length + ((req.monday || {}).files || []).length;
+    const source = req.monday
+      ? `<br><a class="badge-src" href="${escapeHtml(req.monday.url)}" target="_blank" rel="noopener">monday${req.monday.request_number ? ' ' + escapeHtml(req.monday.request_number) : ''}</a>`
+      : '';
     tr.innerHTML = `<td><div class="rq-actions"></div></td>
-      <td>${req.number}</td>
+      <td>${req.number}${source}</td>
       <td class="nowrap">${new Date(req.submitted_at * 1000).toLocaleDateString()}</td>
       <td>${escapeHtml(name)}${req.requester_email ? `<br><a href="mailto:${escapeHtml(req.requester_email)}" class="hint">${escapeHtml(req.requester_email)}</a>` : ''}</td>
       <td>${escapeHtml(req.vendor_name)}${notInQb(qb.vendor)}</td>
@@ -304,7 +307,11 @@ function renderDetail(req) {
     .filter(([, v]) => v)
     .map(([k, v]) => `<div><span class="hint">${k}</span> ${escapeHtml(v)}</div>`).join('')
     + (req.attachments || []).map((a, i) => `<div><span class="hint">File</span> `
-      + `<a href="/api/requests/${req.number}/files/${i}" target="_blank">${escapeHtml(a.file_name)}</a></div>`).join('');
+      + `<a href="/api/requests/${req.number}/files/${i}" target="_blank">${escapeHtml(a.file_name)}</a></div>`).join('')
+    + (req.monday ? `<div><span class="hint">monday</span> <a href="${escapeHtml(req.monday.url)}" target="_blank" rel="noopener">`
+      + `${escapeHtml(req.monday.name || 'Open item')}</a>${req.monday.decision_sent ? ` (${escapeHtml(req.monday.decision_sent)} sent)` : ''}</div>` : '')
+    + ((req.monday || {}).files || []).map((f) => `<div><span class="hint">File (monday)</span> `
+      + `<a href="${escapeHtml(f.url)}" target="_blank" rel="noopener">${escapeHtml(f.name)}</a></div>`).join('');
 
   document.getElementById('rq-detail-lines').innerHTML = req.lines.map((l) => `
     <tr><td>${escapeHtml(l.item_name)}${l.item_id ? '' : ' <span class="badge-warn">no QB item</span>'}</td>
@@ -356,7 +363,8 @@ function checkQuickBooks(req) {
 
 function setStatus(number, status, note) {
   return api(`/api/requests/${number}/status`, { method: 'POST', body: JSON.stringify({ status, note }) })
-    .then(() => {
+    .then((req) => {
+      if (req.monday_error) alert(`Saved here, but monday wasn't updated: ${req.monday_error}\nIt will be retried on the next sync.`);
       loadQueue();
       if (rq.current && rq.current.number === number) openRequest(number);
     })
@@ -380,6 +388,27 @@ function setupQueue() {
   document.getElementById('rq-reject-btn').addEventListener('click', () => rejectRequest(rq.current.number));
   document.getElementById('rq-reopen-btn').addEventListener('click', () => setStatus(rq.current.number, 'open', ''));
   document.getElementById('rq-search').addEventListener('input', renderQueue);
+  document.getElementById('rq-sync-btn').addEventListener('click', () => syncMonday(true));
+}
+
+// Pull new requests from the monday board (through n8n) into the table.
+function syncMonday(force) {
+  const el = document.getElementById('rq-sync-status');
+  const btn = document.getElementById('rq-sync-btn');
+  btn.disabled = true;
+  return api('/api/requests/sync', { method: 'POST', body: JSON.stringify({ force }) })
+    .then((r) => {
+      if (!r.enabled) {
+        el.textContent = 'monday sync is off (no n8n API key configured).';
+        btn.style.display = 'none';
+        return;
+      }
+      el.textContent = r.error ? r.error
+        : `monday checked ${new Date(r.at * 1000).toLocaleTimeString()}${r.new ? ` -- ${r.new} new request(s)` : ''}.`;
+      if (r.new) loadQueue();
+    })
+    .catch((e) => { el.textContent = e.message; })
+    .finally(() => { btn.disabled = false; });
 }
 
 // ---------------------------------------------------------------------
@@ -389,6 +418,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupRequestForm();
   setupQueue();
   loadQueue();
+  syncMonday(false);
   api('/api/reference').then((data) => {
     rq.vendors = data.vendors || [];
     rq.items = data.items || [];

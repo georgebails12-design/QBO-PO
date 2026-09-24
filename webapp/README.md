@@ -209,3 +209,52 @@ label to the right list there. The item question can be:
   returns every name as `[{"label", "value"}]`. `&q=...` filters the list,
   and `&format=names` returns plain strings. Use this if your Fillout plan
   can load dropdown options from a URL.
+
+## monday.com requests (through n8n)
+
+Fillout submissions also land on the monday.com **Purchasing Requests**
+board. Two n8n workflows (on n8n.pandawd.online) connect that board to the
+review table here.
+
+**monday → PO Requests to Review**
+- Copies each new item in the board's *New Requests* group into the n8n
+  data table **PO Requests to Review**: requester, email, vendor, project /
+  job #, location, needed-by, items (from all the per-category item
+  columns), notes, file links and a link to the monday item.
+- Items that already have a PO # are skipped.
+- It runs from a monday "When an item is created → send a webhook"
+  automation, plus a re-sync every 15 minutes as a safety net.
+- The re-sync never overwrites the review columns.
+
+**PO Requests Review API**
+- `GET /webhook/po-requests?status=pending` returns the rows nobody has
+  reviewed yet.
+- `POST /webhook/po-requests/review` records a decision. It writes to the
+  table and sets monday's Request Status to Approved/Declined, plus the
+  PO # when there is one.
+- Both endpoints need the `X-PO-Key` header.
+
+**In this app**
+- The PO Requests page pulls pending monday requests into **Requests to
+  Review** when it loads (at most once a minute; **Refresh from monday**
+  forces it). They're marked with a *monday* badge that links to the item.
+- **Reject** sends *Declined* (with the reason) back to monday.
+- Creating the PO sends *Approved* and the PO number.
+- A decision that couldn't be sent is retried on the next sync.
+
+Setup:
+1. In n8n, create a **Header Auth** credential named "PO App API key":
+   name `X-PO-Key`, value a long random secret. Select it on both webhook
+   nodes of *PO Requests Review API*.
+2. Activate both workflows.
+3. On the monday board: Integrate → Webhooks → "When an item is created,
+   send a webhook" → the *monday → PO Requests to Review* workflow's
+   production URL (`https://n8n.pandawd.online/webhook/monday-po-requests`).
+4. On this server, put the same secret in `n8n_api_key` next to `app.py`
+   (or set `N8N_API_KEY`). `N8N_WEBHOOK_BASE` defaults to
+   `https://n8n.pandawd.online/webhook`. Without a key the monday sync is
+   simply off.
+
+monday file links open in monday (they need a monday login). They're shown
+on the request, but they aren't uploaded to the QuickBooks PO
+automatically.

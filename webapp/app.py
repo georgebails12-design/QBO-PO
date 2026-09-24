@@ -34,6 +34,7 @@ import fillout
 import form_key
 import glass_pdf_parser
 import lookup
+import n8n_requests
 import po_requests
 import qbo_client
 
@@ -352,6 +353,7 @@ def api_purchase_order_create():
         req = po_requests.mark_converted(request_number, result["id"], result.get("doc_number"),
                                          auth.current_user()["username"])
         result["request_attachments"] = _attach_request_files(req, result["id"])
+        result["monday_error"] = n8n_requests.push_decision(req)
     return jsonify(result)
 
 
@@ -454,10 +456,19 @@ def api_requests_set_status(number):
         return err("Request not found.", 404)
     if req["status"] == "converted":
         return err(f"Request #{number} is already PO {req['po_doc_number'] or req['po_id']}.", 409)
-    return jsonify(po_requests.update_request(
-        number, status=status, note=(data.get("note") or "").strip(),
-        reviewed_by=auth.current_user()["username"], reviewed_at=time.time(),
-    ))
+    changes = {"status": status, "note": (data.get("note") or "").strip(),
+               "reviewed_by": auth.current_user()["username"], "reviewed_at": time.time()}
+    if req.get("monday"):
+        changes["monday"] = dict(req["monday"], decision_sent=None)  # a new decision will be sent
+    req = po_requests.update_request(number, **changes)
+    return jsonify(dict(req, monday_error=n8n_requests.push_decision(req)))
+
+
+@app.route("/api/requests/sync", methods=["POST"])
+@auth.login_required
+def api_requests_sync():
+    """Pulls new requests from the monday board (via n8n) into the review table."""
+    return jsonify(n8n_requests.sync(force=bool((request.get_json(silent=True) or {}).get("force"))))
 
 
 @app.route("/api/requests/<int:number>/qbo-duplicates")

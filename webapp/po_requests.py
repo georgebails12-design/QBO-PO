@@ -94,11 +94,11 @@ def clean_request(data, public=False, source=None):
     """Validates a submitted form and returns the fields we store, or raises
     ValueError with a message safe to show on the page. public: the no-login
     request form -- vendor is typed text (matched to QuickBooks on review)
-    and the requester's name and email are required. source="fillout": a
-    Fillout webhook -- typed text like public, but nothing is required, so
-    a submission is never thrown away; the reviewer sorts out what's
-    missing in the table."""
-    lenient = source == "fillout"
+    and the requester's name and email are required. source="fillout" (a
+    Fillout webhook) or "monday" (the monday board, via n8n): typed text
+    like public, but nothing is required, so a submission is never thrown
+    away; the reviewer sorts out what's missing in the table."""
+    lenient = source in ("fillout", "monday")
     vendor_id = str(data.get("vendor_id") or "").strip() or None
     vendor_name = (data.get("vendor_name") or "").strip()
     if public or lenient:

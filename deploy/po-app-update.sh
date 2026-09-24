@@ -30,6 +30,7 @@ EXCLUDES=(
   --exclude=./po_requests.json.lock
   --exclude=./request_uploads
   --exclude=./form_key
+  --exclude=./n8n_api_key
   --exclude=./downloads
   --exclude=./venv
   --exclude=./__pycache__
