@@ -10,50 +10,21 @@ project names) -- never emails, prices, or costs -- and everything comes
 from the cached reference lists, so nothing here calls QuickBooks or can
 change anything in it.
 
-The key is PO_LOOKUP_KEY from the environment, or one generated once and
-saved to lookup_key (gitignored). Print it and ready-made links with:
+Links use the same key as the public request form (see form_key.py).
+Print ready-made links with:
 
     python lookup.py https://po.pandawd.online
-
-Delete lookup_key (and restart the app) to revoke every link handed out.
 """
 
 import difflib
-import hmac
-import os
 import re
-import secrets
 import sys
 
 import qbo_client
-
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-KEY_FILE = os.path.join(APP_DIR, "lookup_key")
+from form_key import get_key, key_ok  # noqa: F401 -- same link key as the request form
 
 KINDS = ("vendor", "item", "project")
 MAX_RESULTS = 20
-
-
-def get_key():
-    env_key = os.environ.get("PO_LOOKUP_KEY")
-    if env_key:
-        return env_key
-    try:
-        fd = os.open(KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        with open(KEY_FILE, "r", encoding="utf-8") as f:
-            key = f.read().strip()
-        if key:
-            return key
-        raise RuntimeError(f"{KEY_FILE} is empty -- delete it and restart.")
-    key = secrets.token_urlsafe(24)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(key)
-    return key
-
-
-def key_ok(given):
-    return bool(given) and hmac.compare_digest(str(given), get_key())
 
 
 def _norm(text):

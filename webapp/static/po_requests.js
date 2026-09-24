@@ -231,6 +231,7 @@ function renderDetail(req) {
   document.getElementById('rq-detail-title').textContent = `Request #${req.number} -- ${req.vendor_name}`;
   const facts = [
     ['Submitted', `${req.submitted_by}, ${new Date(req.submitted_at * 1000).toLocaleString()}`],
+    ['Email', req.requester_email], ['Location', req.location],
     ['Needed by', req.needed_by], ['Q#/Project', req.q_project],
     ['Customer/Project', req.customer && req.customer.name], ['Notes', req.memo],
   ];
@@ -238,7 +239,9 @@ function renderDetail(req) {
   if (req.status === 'rejected') facts.push(['Rejected', `by ${req.reviewed_by}${req.note ? `: ${req.note}` : ''}`]);
   document.getElementById('rq-detail-summary').innerHTML = facts
     .filter(([, v]) => v)
-    .map(([k, v]) => `<div><span class="hint">${k}</span> ${escapeHtml(v)}</div>`).join('');
+    .map(([k, v]) => `<div><span class="hint">${k}</span> ${escapeHtml(v)}</div>`).join('')
+    + (req.attachments || []).map((a, i) => `<div><span class="hint">File</span> `
+      + `<a href="/api/requests/${req.number}/files/${i}" target="_blank">${escapeHtml(a.file_name)}</a></div>`).join('');
 
   document.getElementById('rq-detail-lines').innerHTML = req.lines.map((l) => `
     <tr><td>${escapeHtml(l.item_name)}${l.item_id ? '' : ' <span class="badge-warn">no QB item</span>'}</td>
@@ -261,6 +264,10 @@ function renderDuplicates(req, qbo) {
   });
   let qboNote = '';
   if (qbo && qbo.error) qboNote = `Could not check QuickBooks: ${escapeHtml(qbo.error)}`;
+  else if (qbo && qbo.vendor_unmatched) {
+    qboNote = `"${escapeHtml(req.vendor_name)}" doesn't exactly match a QuickBooks vendor -- pick the right one on the PO page. `
+      + 'QuickBooks POs weren\'t checked.';
+  }
   else if (qbo && qbo.skipped) qboNote = '';
   else if (qbo) {
     qbo.matches.forEach((m) => items.push(`<li>QuickBooks PO ${escapeHtml(m.doc_number || m.id)} `

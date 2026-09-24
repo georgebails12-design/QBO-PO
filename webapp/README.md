@@ -113,3 +113,36 @@ or with at least 60% of the same lines, counts as a possible duplicate
 
 Requests are stored in `po_requests.json` next to `app.py`. It's
 gitignored and deploys never overwrite it.
+
+## Public purchase request form
+
+`/request-form` is a form for people without a login, such as field staff.
+It could replace the Fillout form. It asks for:
+- name and email
+- vendor and project name
+- location and needed-by date
+- items with details and quantities
+- notes and attached files (up to 10, 25MB each)
+
+Submissions land in the PO Requests queue as "Name (form)". Nothing goes
+to QuickBooks, and the form never shows anything from QuickBooks.
+
+On review:
+- the vendor is matched to QuickBooks by name (or picked by hand);
+- each line needs its QuickBooks item picked, and the requester's details
+  are kept as the line description;
+- location, notes and the requester's name and email go into the PO memo;
+- the attached files are uploaded onto the PO in QuickBooks when it's
+  created.
+
+The link carries a secret key. Print it on the server with:
+
+```bash
+python form_key.py https://po.pandawd.online
+```
+
+Anyone with the link can submit requests, so share it like a password.
+Delete `form_key` and restart the app to revoke it and get a new one. The
+key file and the uploaded files (`request_uploads/`) are gitignored and
+deploys never overwrite them. You can set `PO_FORM_KEY` in the environment
+instead.

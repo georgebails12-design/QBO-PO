@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Purchase Request - Panda Windows &amp; Doors</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="brand">
+      <img src="{{ url_for('static', filename='panda_logo.png') }}" alt="Panda Windows &amp; Doors" class="brand-logo"
+           onerror="this.style.display='none'; document.getElementById('brand-word').style.display='inline';">
+      <span id="brand-word" class="brand-word" style="display:none;">Panda Windows &amp; Doors</span>
+    </span>
+  </div>
+</header>
+<main class="page form-page">
+<form id="rf-form" novalidate>
+  <div class="card">
+    <h1 class="form-title">Purchase Request</h1>
+    <p class="hint">Tell us what needs to be ordered. Purchasing reviews every request before a purchase order is created.</p>
+
+    <h2 class="form-section">Your details</h2>
+    <div class="field-row">
+      <label class="field"><span>Name *</span><input type="text" id="rf-name" autocomplete="name" required></label>
+      <label class="field"><span>Email *</span><input type="email" id="rf-email" autocomplete="email" required></label>
+    </div>
+
+    <h2 class="form-section">Order</h2>
+    <div class="field-row">
+      <label class="field"><span>Vendor *</span><input type="text" id="rf-vendor" required placeholder="Who should we order from?"></label>
+      <label class="field"><span>Project name</span><input type="text" id="rf-project" placeholder="Job, Q#, or customer"></label>
+    </div>
+    <div class="field-row">
+      <label class="field wide"><span>Location</span><input type="text" id="rf-location" placeholder="Where it's needed -- jobsite address, shop, etc."></label>
+      <label class="field small"><span>Needed by</span><input type="date" id="rf-needed-by"></label>
+    </div>
+
+    <table class="grid rf-lines">
+      <thead><tr><th>Item</th><th>Details (size, color, part #...)</th><th>Qty</th><th></th></tr></thead>
+      <tbody id="rf-lines-body"></tbody>
+    </table>
+    <button type="button" class="btn-secondary" id="rf-add-line">+ Add item</button>
+
+    <h2 class="form-section">Notes &amp; files</h2>
+    <label class="field"><span>Notes</span><textarea id="rf-notes" rows="4" placeholder="Anything purchasing should know"></textarea></label>
+    <div class="rf-files">
+      <input type="file" id="rf-file-input" multiple style="display:none;">
+      <button type="button" class="btn-secondary" id="rf-file-btn">Attach files...</button>
+      <span class="hint">Quotes, drawings, photos -- up to 10 files, 25MB each.</span>
+      <ul id="rf-file-list" class="attachment-list"></ul>
+    </div>
+
+    <p class="error" id="rf-error" style="display:none;"></p>
+    <div class="footer-bar">
+      <span class="hint">* required</span>
+      <button type="submit" class="btn-primary" id="rf-submit">Submit Request</button>
+    </div>
+  </div>
+</form>
+
+<div class="card" id="rf-done" style="display:none;">
+  <h1 class="form-title">Request received</h1>
+  <p id="rf-done-text"></p>
+  <button type="button" class="btn-secondary" id="rf-another">Submit another request</button>
+</div>
+</main>
+<script>const FORM_KEY = {{ key | tojson }};</script>
+<script src="{{ url_for('static', filename='request_form.js') }}"></script>
+</body>
+</html>

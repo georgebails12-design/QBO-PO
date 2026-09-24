@@ -15,6 +15,7 @@ login sessions survive a restart; a random one is generated otherwise
 """
 
 import concurrent.futures
+import json
 import os
 import secrets
 import tempfile
@@ -27,6 +28,7 @@ from flask import Flask, Response, jsonify, redirect, render_template, request, 
 
 import auth
 import cardinal_glass_output
+import form_key
 import glass_pdf_parser
 import po_requests
 import qbo_client
@@ -66,6 +68,7 @@ def load_secret_key():
 app = Flask(__name__)
 app.secret_key = load_secret_key()
 app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 12  # 12 hours
+app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # all files on one request/upload together
 
 TOKEN_LOCK = threading.Lock()  # serialize QBO token refreshes across concurrent users
 
@@ -75,6 +78,11 @@ REFRESH_LOCK = threading.Lock()
 
 def err(message, code=400):
     return jsonify({"error": str(message)}), code
+
+
+@app.errorhandler(413)
+def too_large(_exc):
+    return err("The files are too large together (100MB limit).", 413)
 
 
 # ---------------------------------------------------------------------------
@@ -337,9 +345,26 @@ def api_purchase_order_create():
         return err(exc, 502)
 
     if request_number is not None:
-        po_requests.mark_converted(request_number, result["id"], result.get("doc_number"),
-                                   auth.current_user()["username"])
+        req = po_requests.mark_converted(request_number, result["id"], result.get("doc_number"),
+                                         auth.current_user()["username"])
+        result["request_attachments"] = _attach_request_files(req, result["id"])
     return jsonify(result)
+
+
+def _attach_request_files(req, po_id):
+    """Uploads the files attached to a PO request onto its new QuickBooks PO."""
+    uploaded, errors = 0, []
+    for i, att in enumerate(req.get("attachments") or []):
+        try:
+            with open(po_requests.attachment_path(req, i), "rb") as f:
+                content = f.read()
+            with TOKEN_LOCK:
+                qbo_client.get_valid_access_token()
+            qbo_client.upload_attachment("PurchaseOrder", po_id, att["file_name"], content, att["content_type"])
+            uploaded += 1
+        except (OSError, qbo_client.QBOError) as exc:
+            errors.append(f"{att['file_name']}: {exc}")
+    return {"uploaded": uploaded, "errors": errors}
 
 
 # ---------------------------------------------------------------------------
@@ -407,14 +432,72 @@ def api_requests_qbo_duplicates(number):
     req = po_requests.get_request(number)
     if not req:
         return err("Request not found.", 404)
+    vendor_id = req["vendor_id"] or _vendor_id_by_name(req["vendor_name"])
+    if not vendor_id:
+        return jsonify({"checked": 0, "matches": [], "vendor_unmatched": True})
     with TOKEN_LOCK:
         qbo_client.get_valid_access_token()
     try:
-        pos = qbo_client.search_purchase_orders(vendor_id=req["vendor_id"], limit=50)
+        pos = qbo_client.search_purchase_orders(vendor_id=vendor_id, limit=50)
     except qbo_client.QBOError as exc:
         return err(exc, 502)
     formatted = [qbo_client.format_purchase_order(po) for po in pos]
     return jsonify({"checked": len(formatted), "matches": po_requests.find_similar_pos(req, formatted)})
+
+
+def _vendor_id_by_name(name):
+    """A form request's typed vendor, matched to the cached QuickBooks list (exact, ignoring case/spacing)."""
+    wanted = " ".join((name or "").lower().split())
+    vendors = (qbo_client.load_reference_cache() or {}).get("vendors", [])
+    return next((v["id"] for v in vendors if " ".join((v.get("name") or "").lower().split()) == wanted), None)
+
+
+@app.route("/api/requests/<int:number>/files/<int:index>")
+@auth.login_required
+def api_requests_file(number, index):
+    req = po_requests.get_request(number)
+    path = req and po_requests.attachment_path(req, index)
+    if not path or not os.path.exists(path):
+        return err("File not found.", 404)
+    return send_file(path, download_name=req["attachments"][index]["file_name"])
+
+
+# ---------------------------------------------------------------------------
+# Public PO request form -- no login; the link carries the form key (see
+# form_key.py). Submissions land in the PO Requests queue for review; the
+# form never shows anything from QuickBooks.
+# ---------------------------------------------------------------------------
+@app.route("/request-form")
+def request_form_page():
+    if not form_key.key_ok(request.args.get("key")):
+        return render_template("link_denied.html"), 403
+    return render_template("request_form.html", key=request.args.get("key"))
+
+
+@app.route("/api/request-form", methods=["POST"])
+def api_request_form_submit():
+    if not form_key.key_ok(request.args.get("key")):
+        return err("This form link is no longer valid -- ask for a new one.", 403)
+    try:
+        fields = po_requests.clean_request(json.loads(request.form.get("data") or "{}"), public=True)
+    except (ValueError, json.JSONDecodeError) as exc:
+        return err(exc)
+    files = [f for f in request.files.getlist("files") if f and f.filename]
+    if len(files) > po_requests.MAX_FILES:
+        return err(f"Attach at most {po_requests.MAX_FILES} files.")
+    for f in files:
+        f.stream.seek(0, os.SEEK_END)
+        too_big = f.stream.tell() > po_requests.MAX_FILE_BYTES
+        f.stream.seek(0)
+        if too_big:
+            return err(f'"{f.filename}" is too large (25MB limit per file).')
+
+    req = po_requests.add_request(fields, f"{fields['requester_name']} (form)")
+    try:
+        po_requests.save_attachments(req["number"], files)
+    except (OSError, ValueError) as exc:
+        return err(f"Request #{req['number']} was received, but attaching files failed: {exc}", 500)
+    return jsonify({"number": req["number"]})
 
 
 # ---------------------------------------------------------------------------

@@ -5,9 +5,15 @@ PO requests: someone fills in a form with what they need ordered, it waits
 in a review queue, and whoever creates POs loads it into the Purchase Order
 page with one click instead of re-typing it.
 
-Requests live in po_requests.json next to app.py (gitignored, never
-overwritten by deploys). Every write goes through a file lock so several
-WSGI workers can't clobber each other.
+Requests come from two places: the PO Requests page (logged-in users,
+vendor/items picked from QuickBooks) and the public request form
+(/request-form, no login -- vendor/items typed as text, plus the
+requester's name, email, location and attached files).
+
+Requests live in po_requests.json next to app.py, and attached files in
+request_uploads/<number>/ (both gitignored, never overwritten by deploys).
+Every write goes through a file lock so several WSGI workers can't clobber
+each other.
 
 Duplicate checks (the point of the queue, besides not re-typing):
   * find_similar_requests -- another open/converted request for the same
@@ -23,6 +29,8 @@ import re
 import threading
 import time
 
+from werkzeug.utils import secure_filename
+
 try:
     import fcntl
 except ImportError:  # Windows dev box -- the thread lock still covers the single-process dev server
@@ -31,6 +39,11 @@ except ImportError:  # Windows dev box -- the thread lock still covers the singl
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 REQUESTS_FILE = os.path.join(APP_DIR, "po_requests.json")
 LOCK_FILE = REQUESTS_FILE + ".lock"
+UPLOAD_DIR = os.path.join(APP_DIR, "request_uploads")
+
+MAX_FILES = 10
+MAX_FILE_BYTES = 25 * 1024 * 1024  # QuickBooks' own attachment limit
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 STATUSES = ("open", "converted", "rejected")
 LINE_OVERLAP_THRESHOLD = 0.6   # share of the larger order's lines that must match to call two orders "similar"
@@ -77,13 +90,26 @@ def _num(value, default=0.0):
         return default
 
 
-def clean_request(data):
+def clean_request(data, public=False):
     """Validates a submitted form and returns the fields we store, or raises
-    ValueError with a message safe to show on the page."""
-    vendor_id = str(data.get("vendor_id") or "").strip()
+    ValueError with a message safe to show on the page. public: the no-login
+    request form -- vendor is typed text (matched to QuickBooks on review)
+    and the requester's name and email are required."""
+    vendor_id = str(data.get("vendor_id") or "").strip() or None
     vendor_name = (data.get("vendor_name") or "").strip()
-    if not vendor_id or not vendor_name:
+    if public:
+        vendor_id = None
+        if not vendor_name:
+            raise ValueError("Enter the vendor.")
+    elif not vendor_id or not vendor_name:
         raise ValueError("Pick a vendor from the list.")
+
+    requester_name = (data.get("requester_name") or "").strip()
+    requester_email = (data.get("requester_email") or "").strip()
+    if public and not requester_name:
+        raise ValueError("Enter your name.")
+    if public and not EMAIL_RE.match(requester_email):
+        raise ValueError("Enter a valid email address.")
 
     lines = []
     for line in data.get("lines") or []:
@@ -104,13 +130,18 @@ def clean_request(data):
 
     customer = data.get("customer") or {}
     return {
+        "source": "form" if public else "app",
         "vendor_id": vendor_id,
         "vendor_name": vendor_name,
         "customer": {"id": str(customer.get("id") or "") or None, "name": (customer.get("name") or "").strip()},
         "q_project": (data.get("q_project") or "").strip(),
+        "location": (data.get("location") or "").strip(),
         "needed_by": (data.get("needed_by") or "").strip(),
+        "requester_name": requester_name,
+        "requester_email": requester_email,
         "memo": (data.get("memo") or "").strip(),
         "lines": lines,
+        "attachments": [],
     }
 
 
@@ -154,6 +185,36 @@ def update_request(number, **changes):
     return req
 
 
+def save_attachments(number, files):
+    """Stores uploaded files (werkzeug FileStorage) under request_uploads/<number>/
+    and records them on the request. Raises ValueError for too many/too big."""
+    files = [f for f in files if f and f.filename]
+    if len(files) > MAX_FILES:
+        raise ValueError(f"Attach at most {MAX_FILES} files.")
+    folder = os.path.join(UPLOAD_DIR, str(number))
+    os.makedirs(folder, exist_ok=True)
+    saved = []
+    for i, f in enumerate(files):
+        stored_name = f"{i}_{secure_filename(f.filename) or 'file'}"
+        path = os.path.join(folder, stored_name)
+        f.save(path)
+        size = os.path.getsize(path)
+        if size > MAX_FILE_BYTES:
+            os.unlink(path)
+            raise ValueError(f'"{f.filename}" is too large (25MB limit per file).')
+        saved.append({"file_name": f.filename, "stored_name": stored_name, "size": size,
+                      "content_type": f.mimetype or "application/octet-stream"})
+    return update_request(number, attachments=saved)
+
+
+def attachment_path(req, index):
+    """Path on disk of a request's index-th attachment, or None."""
+    attachments = req.get("attachments") or []
+    if not 0 <= index < len(attachments):
+        return None
+    return os.path.join(UPLOAD_DIR, str(req["number"]), attachments[index]["stored_name"])
+
+
 def mark_converted(number, po_id, po_doc_number, reviewed_by):
     return update_request(number, status="converted", po_id=po_id, po_doc_number=po_doc_number,
                           reviewed_by=reviewed_by, reviewed_at=time.time())
@@ -185,6 +246,13 @@ def _overlap(a, b):
     return len(a & b) / max(len(a), len(b))
 
 
+def _same_vendor(a, b):
+    """Form requests only have the vendor's name, not its QuickBooks id."""
+    if a.get("vendor_id") and b.get("vendor_id"):
+        return a["vendor_id"] == b["vendor_id"]
+    return _norm(a.get("vendor_name")) == _norm(b.get("vendor_name"))
+
+
 def _match_reasons(q_project, keys, other_q_project, other_keys):
     reasons = []
     if q_project and _norm(q_project) == _norm(other_q_project):
@@ -205,7 +273,7 @@ def find_similar_requests(fields, exclude_number=None, pool=None):
     for other in list_requests() if pool is None else pool:
         if other["number"] == exclude_number or other["status"] == "rejected":
             continue
-        if other["vendor_id"] != fields["vendor_id"] or other["submitted_at"] < cutoff:
+        if not _same_vendor(other, fields) or other["submitted_at"] < cutoff:
             continue
         reasons = _match_reasons(fields["q_project"], keys, other["q_project"], _line_keys(other["lines"]))
         if reasons:

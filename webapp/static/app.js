@@ -87,7 +87,12 @@ function setupHeader() {
     input: document.getElementById('vendor-input'),
     box: document.getElementById('vendor-suggestions'),
     source: () => state.vendors, filter: vendorFilter, render: (v) => v.name,
-    onPick: (v) => { state.vendorId = v.id; document.getElementById('vendor-input').value = v.name; loadVendorEmail(v); },
+    onPick: (v) => {
+      state.vendorId = v.id;
+      document.getElementById('vendor-input').value = v.name;
+      document.getElementById('vendor-input').classList.remove('needs-pick');
+      loadVendorEmail(v);
+    },
   });
   document.getElementById('vendor-input').addEventListener('input', () => {
     state.vendorId = null;
@@ -177,10 +182,12 @@ function addItemRow() {
   attachTypeahead({
     input: itemInput, box: itemBox, source: () => state.items, filter: itemFilter, render: itemLabel,
     onPick: (it) => {
+      // Keep a request's own details (size, color...) rather than the item's stock description.
+      const keepDesc = itemInput.classList.contains('needs-pick') && descInput.value.trim();
       row.itemId = it.id;
       itemInput.classList.remove('needs-pick');
       itemInput.value = it.name;
-      descInput.value = it.description || '';
+      if (!keepDesc) descInput.value = it.description || '';
       const price = it.purchase_cost != null ? it.purchase_cost : it.unit_price;
       rateInput.value = typeof price === 'number' ? price.toFixed(2) : '0.00';
       recalc();
@@ -574,6 +581,11 @@ function setupSubmit() {
         request_number: state.requestNumber,
       }),
     }).then((result) => {
+      const fromRequest = result.request_attachments;
+      if (fromRequest && fromRequest.errors.length) {
+        alert(`These files from the request could not be attached to the PO:\n${fromRequest.errors.join('\n')}\n`
+          + 'Download them from PO Requests and add them on View Purchase Orders.');
+      }
       if (!state.pendingAttachments.length) {
         finishCreate(result, `Purchase Order ${result.doc_number || result.id} was created in QuickBooks.`);
         return;
@@ -599,6 +611,7 @@ function finishCreate(result, message) {
 function resetForm() {
   state.requestNumber = null;
   document.getElementById('request-banner').style.display = 'none';
+  document.getElementById('vendor-input').classList.remove('needs-pick');
   if (window.location.search) history.replaceState(null, '', window.location.pathname);
   document.getElementById('memo').value = '';
   document.getElementById('q-project').value = '';
@@ -646,13 +659,27 @@ function loadRequestFromUrl() {
 function fillFromRequest(req) {
   state.requestNumber = req.number;
 
-  const vendor = state.vendors.find((v) => v.id === req.vendor_id) || { id: req.vendor_id, name: req.vendor_name };
-  state.vendorId = vendor.id;
-  document.getElementById('vendor-input').value = vendor.name;
-  loadVendorEmail(vendor);
+  // Web-form requests only have the vendor's name as typed -- match it, or leave it to pick.
+  const norm = (t) => (t || '').toLowerCase().split(/\s+/).filter(Boolean).join(' ');
+  const vendorInput = document.getElementById('vendor-input');
+  const vendor = req.vendor_id
+    ? (state.vendors.find((v) => v.id === req.vendor_id) || { id: req.vendor_id, name: req.vendor_name })
+    : state.vendors.find((v) => norm(v.name) === norm(req.vendor_name));
+  if (vendor) {
+    state.vendorId = vendor.id;
+    vendorInput.value = vendor.name;
+    loadVendorEmail(vendor);
+  } else {
+    vendorInput.value = req.vendor_name;
+    vendorInput.classList.add('needs-pick');
+    vendorInput.title = 'Not a QuickBooks vendor name -- retype and pick the right vendor from the list.';
+  }
 
   document.getElementById('q-project').value = req.q_project || '';
-  document.getElementById('memo').value = req.memo || '';
+  const memo = [req.memo];
+  if (req.location) memo.push(`Location: ${req.location}`);
+  if (req.requester_email) memo.push(`Requested by ${req.requester_name} <${req.requester_email}>`);
+  document.getElementById('memo').value = memo.filter(Boolean).join(' | ');
   if (req.customer && req.customer.id) {
     state.headerCustomer = { id: req.customer.id, name: req.customer.name };
     document.getElementById('header-customer-input').value = req.customer.name;
@@ -688,6 +715,8 @@ function renderRequestBanner(req, qbo) {
   const banner = document.getElementById('request-banner');
   const when = new Date(req.submitted_at * 1000).toLocaleString();
   const unpicked = state.itemRows.filter((r) => r.itemInput.classList.contains('needs-pick')).length;
+  const files = (req.attachments || []).length;
+  const vendorUnpicked = document.getElementById('vendor-input').classList.contains('needs-pick');
   const warnings = [];
   (req.similar_requests || []).forEach((m) => {
     const what = m.status === 'converted' ? `already PO ${escapeHtml(m.po_doc_number || '')}` : 'still open';
@@ -696,6 +725,8 @@ function renderRequestBanner(req, qbo) {
   let qboLine = '<span class="hint">Checking QuickBooks for similar POs from this vendor...</span>';
   if (qbo && qbo.error) {
     qboLine = `<span class="hint">Could not check QuickBooks: ${escapeHtml(qbo.error)}</span>`;
+  } else if (qbo && qbo.vendor_unmatched) {
+    qboLine = '<span class="hint">QuickBooks POs weren\'t checked because the vendor isn\'t matched yet.</span>';
   } else if (qbo) {
     qbo.matches.forEach((m) => {
       warnings.push(`PO ${escapeHtml(m.doc_number || m.id)} (${escapeHtml(m.txn_date || '')}, `
@@ -707,7 +738,9 @@ function renderRequestBanner(req, qbo) {
   banner.innerHTML = `<strong>Loaded from request #${req.number}</strong> -- submitted by ${escapeHtml(req.submitted_by)} `
     + `on ${escapeHtml(when)}${req.needed_by ? `, needed by ${escapeHtml(req.needed_by)}` : ''}. `
     + 'Review everything below, then create the PO.'
+    + (vendorUnpicked ? `<br>Vendor "${escapeHtml(req.vendor_name)}" isn't an exact QuickBooks match -- pick it from the list.` : '')
     + (unpicked ? `<br>${unpicked} line(s) need a QuickBooks item picked (highlighted).` : '')
+    + (files ? `<br>${files} file(s) from the request will be attached to the PO in QuickBooks when it's created.` : '')
     + (warnings.length ? `<br><strong>Possible duplicates:</strong><ul>${warnings.map((w) => `<li>${w}</li>`).join('')}</ul>` : '<br>')
     + qboLine;
   banner.style.display = 'block';
