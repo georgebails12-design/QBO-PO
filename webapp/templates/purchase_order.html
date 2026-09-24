@@ -2,6 +2,7 @@
 {% block title %}New Purchase Order{% endblock %}
 {% block content %}
 <div class="card header-card">
+  <div id="request-banner" class="request-banner" style="display:none;"></div>
   <div class="field-row">
     <label class="field">
       <span>Vendor</span>
@@ -142,5 +143,6 @@
   </div>
 </dialog>
 
+<script src="{{ url_for('static', filename='common.js') }}"></script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 {% endblock %}

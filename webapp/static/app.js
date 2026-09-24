@@ -11,65 +11,11 @@ const state = {
   categoryRows: [],
   nextRowId: 1,
   pendingAttachments: [],
+  requestNumber: null,  // set when the form was filled from a PO request
 };
 
-function api(path, opts) {
-  return fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts))
-    .then(async (res) => {
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 401) {
-        // Session expired: log in again in a new tab so nothing typed on this page is lost.
-        window.open('/login', '_blank');
-        throw new Error('Your login expired. Log in again in the new tab, then retry here -- nothing on this page was lost.');
-      }
-      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-      return data;
-    });
-}
-
-function fmtMoney(n) { return (Math.round((n + Number.EPSILON) * 100) / 100).toFixed(2); }
-
-// ---------------------------------------------------------------------
-// Generic type-ahead
-// ---------------------------------------------------------------------
-function attachTypeahead({ input, box, source, filter, render, onPick }) {
-  let matches = [];
-  function hide() { box.classList.remove('open'); box.innerHTML = ''; }
-  function show() {
-    box.innerHTML = '';
-    matches.forEach((item) => {
-      const div = document.createElement('div');
-      div.className = 'suggestion';
-      div.textContent = render(item);
-      div.addEventListener('mousedown', (e) => { e.preventDefault(); onPick(item); hide(); });
-      box.appendChild(div);
-    });
-    box.classList.toggle('open', matches.length > 0);
-  }
-  input.addEventListener('input', () => {
-    const term = input.value.trim().toLowerCase();
-    if (!term) { hide(); return; }
-    matches = source().filter((it) => filter(it, term)).slice(0, 8);
-    show();
-  });
-  input.addEventListener('blur', () => setTimeout(hide, 150));
-  input.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
-}
-
-function vendorFilter(v, term) { return v.name.toLowerCase().includes(term); }
-function itemFilter(it, term) {
-  return it.name.toLowerCase().includes(term) || (it.description || '').toLowerCase().includes(term);
-}
 function accountFilter(a, term) {
   return a.name.toLowerCase().includes(term) || (a.account_type || '').toLowerCase().includes(term);
-}
-function customerFilter(c, term) { return c.name.toLowerCase().includes(term); }
-
-function itemLabel(it) {
-  const price = it.purchase_cost != null ? it.purchase_cost : it.unit_price;
-  const priceStr = typeof price === 'number' ? price.toFixed(2) : '--';
-  const desc = (it.description || '').trim();
-  return (desc ? `${it.name} — ${desc}` : it.name) + `  ($${priceStr})`;
 }
 function accountLabel(a) { return `${a.name} (${a.account_type || ''})`; }
 
@@ -217,7 +163,7 @@ function addItemRow() {
 
   const row = {
     id, itemId: null, itemInput, descInput, qtyInput, rateInput, amountCell, customerInput,
-    customerId: null,
+    customerId: null, recalc,
   };
   state.itemRows.push(row);
 
@@ -232,6 +178,7 @@ function addItemRow() {
     input: itemInput, box: itemBox, source: () => state.items, filter: itemFilter, render: itemLabel,
     onPick: (it) => {
       row.itemId = it.id;
+      itemInput.classList.remove('needs-pick');
       itemInput.value = it.name;
       descInput.value = it.description || '';
       const price = it.purchase_cost != null ? it.purchase_cost : it.unit_price;
@@ -466,10 +413,6 @@ function renderGlassReview(parsed) {
   document.getElementById('glass-status').textContent = '';
 }
 
-function escapeHtml(s) {
-  return (s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 function createGlassItems() {
   const category = document.getElementById('glass-category').value;
   const statusEl = document.getElementById('glass-status');
@@ -610,6 +553,9 @@ function setupSubmit() {
       categoryLines.push({ account_id: r.accountId, description: r.descInput.value.trim(), amount, customer_id: r.customerId });
     });
     if (!itemLines.length && !categoryLines.length) { alert('Add at least one line item or category line.'); return; }
+    const unpicked = state.itemRows.filter((r) => !r.itemId && r.itemInput.classList.contains('needs-pick'));
+    if (unpicked.length && !confirm(`${unpicked.length} line(s) from the request still have no QuickBooks item picked `
+      + `and will be left off this PO. Continue anyway?`)) return;
 
     const poNumber = document.getElementById('po-number').value.trim();
     const totalText = document.getElementById('total-display').textContent;
@@ -625,6 +571,7 @@ function setupSubmit() {
         q_project: document.getElementById('q-project').value.trim(),
         doc_number: poNumber,
         po_email: document.getElementById('vendor-email').value.trim(),
+        request_number: state.requestNumber,
       }),
     }).then((result) => {
       if (!state.pendingAttachments.length) {
@@ -650,6 +597,9 @@ function finishCreate(result, message) {
 }
 
 function resetForm() {
+  state.requestNumber = null;
+  document.getElementById('request-banner').style.display = 'none';
+  if (window.location.search) history.replaceState(null, '', window.location.pathname);
   document.getElementById('memo').value = '';
   document.getElementById('q-project').value = '';
   document.getElementById('header-customer-input').value = '';
@@ -667,6 +617,103 @@ function resetForm() {
 }
 
 // ---------------------------------------------------------------------
+// Fill the form from a PO request (/?request=N, linked from PO Requests)
+// ---------------------------------------------------------------------
+function loadRequestFromUrl() {
+  const number = new URLSearchParams(window.location.search).get('request');
+  if (!number) return;
+  const banner = document.getElementById('request-banner');
+  api(`/api/requests/${encodeURIComponent(number)}`).then((req) => {
+    if (req.status === 'converted') {
+      banner.className = 'request-banner warn';
+      banner.textContent = `Request #${req.number} was already turned into PO ${req.po_doc_number || req.po_id} -- `
+        + 'not loaded, so it can\'t be ordered twice.';
+      banner.style.display = 'block';
+      return;
+    }
+    fillFromRequest(req);
+    renderRequestBanner(req, null);
+    api(`/api/requests/${req.number}/qbo-duplicates`)
+      .then((qbo) => renderRequestBanner(req, qbo))
+      .catch((e) => renderRequestBanner(req, { error: e.message }));
+  }).catch((e) => {
+    banner.className = 'request-banner warn';
+    banner.textContent = `Could not load request #${number}: ${e.message}`;
+    banner.style.display = 'block';
+  });
+}
+
+function fillFromRequest(req) {
+  state.requestNumber = req.number;
+
+  const vendor = state.vendors.find((v) => v.id === req.vendor_id) || { id: req.vendor_id, name: req.vendor_name };
+  state.vendorId = vendor.id;
+  document.getElementById('vendor-input').value = vendor.name;
+  loadVendorEmail(vendor);
+
+  document.getElementById('q-project').value = req.q_project || '';
+  document.getElementById('memo').value = req.memo || '';
+  if (req.customer && req.customer.id) {
+    state.headerCustomer = { id: req.customer.id, name: req.customer.name };
+    document.getElementById('header-customer-input').value = req.customer.name;
+  }
+
+  document.getElementById('item-grid-body').innerHTML = '';
+  state.itemRows = [];
+  req.lines.forEach((line) => {
+    const row = addItemRow();
+    const item = line.item_id && state.items.find((it) => it.id === line.item_id);
+    if (item) {
+      row.itemId = item.id;
+      row.itemInput.value = item.name;
+    } else {
+      row.itemInput.value = line.item_name || '';
+      row.itemInput.classList.add('needs-pick');
+      row.itemInput.title = 'Not a QuickBooks item yet -- pick one from the list (or create it with New Item...).';
+    }
+    row.descInput.value = line.description || '';
+    row.qtyInput.value = line.qty;
+    row.rateInput.value = Number(line.rate || 0).toFixed(2);
+    if (req.customer && req.customer.id) {
+      row.customerId = req.customer.id;
+      row.customerInput.value = req.customer.name;
+    }
+    row.recalc();
+  });
+  addItemRow();
+  updateTotal();
+}
+
+function renderRequestBanner(req, qbo) {
+  const banner = document.getElementById('request-banner');
+  const when = new Date(req.submitted_at * 1000).toLocaleString();
+  const unpicked = state.itemRows.filter((r) => r.itemInput.classList.contains('needs-pick')).length;
+  const warnings = [];
+  (req.similar_requests || []).forEach((m) => {
+    const what = m.status === 'converted' ? `already PO ${escapeHtml(m.po_doc_number || '')}` : 'still open';
+    warnings.push(`Request #${m.number} (${what}): ${escapeHtml(m.reasons.join(', '))}`);
+  });
+  let qboLine = '<span class="hint">Checking QuickBooks for similar POs from this vendor...</span>';
+  if (qbo && qbo.error) {
+    qboLine = `<span class="hint">Could not check QuickBooks: ${escapeHtml(qbo.error)}</span>`;
+  } else if (qbo) {
+    qbo.matches.forEach((m) => {
+      warnings.push(`PO ${escapeHtml(m.doc_number || m.id)} (${escapeHtml(m.txn_date || '')}, `
+        + `$${fmtMoney(Number(m.total || 0))}): ${escapeHtml(m.reasons.join(', '))}`);
+    });
+    qboLine = `<span class="hint">Checked the vendor's last ${qbo.checked} PO(s) in QuickBooks.</span>`;
+  }
+  banner.className = `request-banner${warnings.length ? ' warn' : ''}`;
+  banner.innerHTML = `<strong>Loaded from request #${req.number}</strong> -- submitted by ${escapeHtml(req.submitted_by)} `
+    + `on ${escapeHtml(when)}${req.needed_by ? `, needed by ${escapeHtml(req.needed_by)}` : ''}. `
+    + 'Review everything below, then create the PO.'
+    + (unpicked ? `<br>${unpicked} line(s) need a QuickBooks item picked (highlighted).` : '')
+    + (warnings.length ? `<br><strong>Possible duplicates:</strong><ul>${warnings.map((w) => `<li>${w}</li>`).join('')}</ul>` : '<br>')
+    + qboLine;
+  banner.style.display = 'block';
+}
+
+// ---------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
@@ -677,5 +724,5 @@ document.addEventListener('DOMContentLoaded', () => {
   setupSubmit();
   addItemRow();
   addCategoryRow();
-  Promise.all([loadReference(), loadCategories()]).then(() => { suggestPoNumberOnLoad(); });
+  Promise.all([loadReference(), loadCategories()]).then(() => { suggestPoNumberOnLoad(); loadRequestFromUrl(); });
 });

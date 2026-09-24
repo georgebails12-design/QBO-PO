@@ -85,3 +85,31 @@ export. The one difference: reference data (vendors/items/accounts/
 customers) is refreshed on-demand via a background job polled from the
 page, since QuickBooks paginates at 1000 records/request and this
 company's lists are large (thousands of each).
+
+## PO Requests
+
+**PO Requests** (top nav, `/requests`) is a review queue in front of the
+Purchase Order page:
+
+1. Anyone with a login fills in the request form: vendor, Q#/Project,
+   customer, needed-by date, notes, and lines. Lines can be existing
+   QuickBooks items or free text when the item doesn't exist yet. Nothing
+   goes to QuickBooks at this point.
+2. The reviewer opens a request from the queue and clicks **Review &
+   Create PO**. The Purchase Order page opens already filled in from the
+   request. Free-text lines are highlighted so the reviewer picks or
+   creates the item. Nothing has to be typed a second time.
+3. When the PO is created, the request is marked with the PO number. A
+   request that's already been turned into a PO can't be loaded or
+   converted again.
+
+Duplicate checks: a request for the same vendor with the same Q#/Project,
+or with at least 60% of the same lines, counts as a possible duplicate
+(see `po_requests.py`).
+- Submitting one asks for confirmation (**Submit Anyway**).
+- The queue flags open requests that look like each other.
+- The review screen and the PO page also check the vendor's last 50 POs
+  in QuickBooks the same way.
+
+Requests are stored in `po_requests.json` next to `app.py`. It's
+gitignored and deploys never overwrite it.

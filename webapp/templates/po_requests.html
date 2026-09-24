@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}PO Requests{% endblock %}
+{% block content %}
+<div class="card" id="rq-detail-card" style="display:none;">
+  <div class="card-title-row">
+    <h2 id="rq-detail-title">Request</h2>
+    <div class="card-title-actions">
+      <button type="button" class="btn-secondary" id="rq-reject-btn">Reject</button>
+      <button type="button" class="btn-secondary" id="rq-reopen-btn">Reopen</button>
+      <button type="button" class="btn-primary" id="rq-create-po-btn">Review &amp; Create PO</button>
+      <button type="button" class="btn-secondary" id="rq-close-btn">Close</button>
+    </div>
+  </div>
+  <div id="rq-detail-summary" class="rq-summary"></div>
+  <table class="grid">
+    <thead><tr><th>Item</th><th>Description</th><th>Qty</th><th>Est. Rate</th><th class="amount-cell">Est. Amount</th></tr></thead>
+    <tbody id="rq-detail-lines"></tbody>
+  </table>
+  <div id="rq-detail-duplicates" class="request-banner" style="margin-top:12px;"></div>
+</div>
+
+<div class="card">
+  <div class="card-title-row">
+    <h2>Review Queue</h2>
+    <label class="hint">Show
+      <select id="rq-status-filter">
+        <option value="open">Open</option>
+        <option value="converted">Turned into POs</option>
+        <option value="rejected">Rejected</option>
+        <option value="">All</option>
+      </select>
+    </label>
+  </div>
+  <table class="grid">
+    <thead><tr><th>#</th><th>Vendor</th><th>Q#/Project</th><th>Lines</th><th class="amount-cell">Est. Total</th><th>Submitted</th><th>Status</th></tr></thead>
+    <tbody id="rq-list-body"></tbody>
+  </table>
+  <p class="status-line" id="rq-list-status"></p>
+</div>
+
+<div class="card">
+  <div class="card-title-row">
+    <h2>New PO Request</h2>
+    <span class="hint">Goes into the review queue -- nothing is sent to QuickBooks until someone creates the PO.</span>
+  </div>
+  <div class="field-row">
+    <label class="field">
+      <span>Vendor</span>
+      <div class="typeahead">
+        <input type="text" id="rq-vendor" autocomplete="off" placeholder="Start typing a vendor...">
+        <div class="suggestions" id="rq-vendor-suggestions"></div>
+      </div>
+    </label>
+    <label class="field small">
+      <span>Needed By</span>
+      <input type="date" id="rq-needed-by">
+    </label>
+    <label class="field small">
+      <span>Q#/Project</span>
+      <input type="text" id="rq-q-project">
+    </label>
+  </div>
+  <div class="field-row">
+    <label class="field">
+      <span>Customer/Project</span>
+      <div class="typeahead">
+        <input type="text" id="rq-customer" autocomplete="off" placeholder="Start typing...">
+        <div class="suggestions" id="rq-customer-suggestions"></div>
+      </div>
+    </label>
+    <label class="field wide">
+      <span>Notes / Memo</span>
+      <input type="text" id="rq-memo">
+    </label>
+  </div>
+  <table class="grid">
+    <thead><tr><th>Item</th><th>Description</th><th>Qty</th><th>Est. Rate</th><th class="amount-cell">Amount</th><th></th></tr></thead>
+    <tbody id="rq-lines-body"></tbody>
+  </table>
+  <p class="hint">Pick an existing QuickBooks item when there is one. If there isn't, just type what's needed -- the reviewer will match or create the item.</p>
+  <div id="rq-dup-warning" class="request-banner warn" style="display:none;"></div>
+  <div class="footer-bar">
+    <div id="rq-total" class="total">Est. Total: $0.00</div>
+    <div class="card-title-actions">
+      <button type="button" class="btn-secondary" id="rq-submit-anyway" style="display:none;">Submit Anyway</button>
+      <button type="button" class="btn-primary" id="rq-submit">Submit for Review</button>
+    </div>
+  </div>
+  <p class="status-line" id="rq-form-status"></p>
+</div>
+
+<script src="{{ url_for('static', filename='common.js') }}"></script>
+<script src="{{ url_for('static', filename='po_requests.js') }}"></script>
+{% endblock %}

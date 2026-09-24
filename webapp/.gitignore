@@ -3,6 +3,10 @@ qbo_config.json
 qbo_tokens.json
 qbo_reference_cache.json
 
+# PO request queue (submitted by users on the server)
+po_requests.json
+po_requests.json.*
+
 # Local login accounts -- never commit real credentials
 users.json
 

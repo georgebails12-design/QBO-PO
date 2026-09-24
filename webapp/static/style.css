@@ -135,3 +135,13 @@ dialog h2 { margin: 0 0 12px; font-size: 16px; }
   .field-row { flex-direction: column; }
   .field, .field.small, .field.wide, .field.po-field { flex: 1 1 auto; min-width: 0; }
 }
+
+/* PO Requests */
+.request-banner { background: #eef6f3; border: 1px solid #cfe5dd; border-radius: 8px; padding: 10px 12px; font-size: 13.5px; margin-bottom: 12px; }
+.request-banner.warn { background: #fff6e5; border-color: #f0d49b; }
+.request-banner ul { margin: 6px 0; padding-left: 20px; }
+.badge-warn { display: inline-block; background: #fff0cc; color: #8a5a00; border-radius: 4px; padding: 1px 6px; font-size: 11.5px; font-weight: 600; }
+table.grid input.needs-pick { border-color: #e0a800; background: #fffbea; }
+.clickable-row { cursor: pointer; }
+.clickable-row:hover { background: #f5faf8; }
+.rq-summary { display: flex; flex-wrap: wrap; gap: 6px 24px; font-size: 13.5px; margin-bottom: 10px; }

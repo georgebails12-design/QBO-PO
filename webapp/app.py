@@ -28,6 +28,7 @@ from flask import Flask, Response, jsonify, redirect, render_template, request, 
 import auth
 import cardinal_glass_output
 import glass_pdf_parser
+import po_requests
 import qbo_client
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -118,6 +119,12 @@ def categories_page():
 @auth.login_required
 def purchase_orders_page():
     return render_template("view_purchase_orders.html", user=auth.current_user())
+
+
+@app.route("/requests")
+@auth.login_required
+def requests_page():
+    return render_template("po_requests.html", user=auth.current_user())
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +312,17 @@ def api_purchase_order_create():
         return err("vendor_id is required.")
     if not item_lines and not category_lines:
         return err("Add at least one line item or category line.")
+    request_number = data.get("request_number")
+    if request_number is not None:
+        try:
+            req = po_requests.get_request(int(request_number))
+        except (TypeError, ValueError):
+            return err("request_number must be a number.")
+        if not req:
+            return err(f"PO request #{request_number} no longer exists.", 404)
+        if req["status"] == "converted":
+            return err(f"PO request #{req['number']} was already turned into PO {req['po_doc_number'] or req['po_id']}.", 409)
+        request_number = req["number"]
 
     with TOKEN_LOCK:
         qbo_client.get_valid_access_token()
@@ -318,7 +336,85 @@ def api_purchase_order_create():
     except qbo_client.QBOError as exc:
         return err(exc, 502)
 
+    if request_number is not None:
+        po_requests.mark_converted(request_number, result["id"], result.get("doc_number"),
+                                   auth.current_user()["username"])
     return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# PO requests -- a form's data waits here for review, then loads straight
+# into the Purchase Order page (see po_requests.py).
+# ---------------------------------------------------------------------------
+@app.route("/api/requests")
+@auth.login_required
+def api_requests_list():
+    status = request.args.get("status") or None
+    if status and status not in po_requests.STATUSES:
+        return err("Unknown status.")
+    everything = po_requests.list_requests()
+    shown = [r for r in everything if not status or r["status"] == status]
+    for r in shown:
+        if r["status"] == "open":
+            r["similar_requests"] = po_requests.find_similar_requests(r, exclude_number=r["number"], pool=everything)
+    return jsonify(shown)
+
+
+@app.route("/api/requests", methods=["POST"])
+@auth.login_required
+def api_requests_create():
+    data = request.get_json(force=True)
+    try:
+        fields = po_requests.clean_request(data)
+    except ValueError as exc:
+        return err(exc)
+    similar = po_requests.find_similar_requests(fields)
+    if similar and not data.get("confirm_duplicate"):
+        return jsonify({"error": "This looks like a request that's already in.", "duplicates": similar}), 409
+    return jsonify(po_requests.add_request(fields, auth.current_user()["username"]))
+
+
+@app.route("/api/requests/<int:number>")
+@auth.login_required
+def api_requests_detail(number):
+    req = po_requests.get_request(number)
+    if not req:
+        return err("Request not found.", 404)
+    return jsonify(dict(req, similar_requests=po_requests.find_similar_requests(req, exclude_number=number)))
+
+
+@app.route("/api/requests/<int:number>/status", methods=["POST"])
+@auth.login_required
+def api_requests_set_status(number):
+    data = request.get_json(force=True)
+    status = data.get("status")
+    if status not in ("open", "rejected"):
+        return err("Status can only be set to open or rejected.")
+    req = po_requests.get_request(number)
+    if not req:
+        return err("Request not found.", 404)
+    if req["status"] == "converted":
+        return err(f"Request #{number} is already PO {req['po_doc_number'] or req['po_id']}.", 409)
+    return jsonify(po_requests.update_request(
+        number, status=status, note=(data.get("note") or "").strip(),
+        reviewed_by=auth.current_user()["username"], reviewed_at=time.time(),
+    ))
+
+
+@app.route("/api/requests/<int:number>/qbo-duplicates")
+@auth.login_required
+def api_requests_qbo_duplicates(number):
+    req = po_requests.get_request(number)
+    if not req:
+        return err("Request not found.", 404)
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        pos = qbo_client.search_purchase_orders(vendor_id=req["vendor_id"], limit=50)
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+    formatted = [qbo_client.format_purchase_order(po) for po in pos]
+    return jsonify({"checked": len(formatted), "matches": po_requests.find_similar_pos(req, formatted)})
 
 
 # ---------------------------------------------------------------------------
