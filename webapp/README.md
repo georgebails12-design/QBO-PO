@@ -124,8 +124,22 @@ It could replace the Fillout form. It asks for:
 - items with details and quantities
 - notes and attached files (up to 10, 25MB each)
 
-Submissions land in the PO Requests queue as "Name (form)". Nothing goes
-to QuickBooks, and the form never shows anything from QuickBooks.
+Submissions land in the **Requests to Review** table on the PO Requests
+page, marked "Name (form)". Nothing goes to QuickBooks, and the form never
+shows anything from QuickBooks.
+
+The table:
+- shows every field from the form (requester, email, vendor, project,
+  location, needed-by, items, notes, files);
+- can be searched and filtered (waiting for review / pushed to POs /
+  rejected / all);
+- highlights overdue needed-by dates;
+- exports to CSV (text starting with `=`, `+`, `-` or `@` is quoted so
+  Excel won't run it as a formula).
+
+Each row has **Push to PO**, which opens the purchase order form filled in
+from the request so it can be checked before anything is created, and
+**Reject**. Click a row for full details and the duplicate checks.
 
 On review:
 - the vendor is matched to QuickBooks by name (or picked by hand);

@@ -15,6 +15,8 @@ login sessions survive a restart; a random one is generated otherwise
 """
 
 import concurrent.futures
+import csv
+import io
 import json
 import os
 import secrets
@@ -383,6 +385,36 @@ def api_requests_list():
         if r["status"] == "open":
             r["similar_requests"] = po_requests.find_similar_requests(r, exclude_number=r["number"], pool=everything)
     return jsonify(shown)
+
+
+@app.route("/api/requests.csv")
+@auth.login_required
+def api_requests_csv():
+    """The request table as a spreadsheet. Values starting with = + - @ get a
+    leading ' so text typed into the public form can't run as an Excel formula."""
+    status = request.args.get("status") or None
+    if status and status not in po_requests.STATUSES:
+        return err("Unknown status.")
+
+    def cell(value):
+        text = "" if value is None else str(value)
+        return "'" + text if text[:1] in ("=", "+", "-", "@") else text
+
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(["Request #", "Status", "Submitted", "Requested by", "Email", "Vendor", "Project",
+                     "Location", "Needed by", "Items", "Notes", "Files", "PO #"])
+    for r in po_requests.list_requests(status):
+        items = "; ".join(f"{l['qty']:g} x {' -- '.join(filter(None, [l['item_name'], l['description']]))}"
+                          for l in r["lines"])
+        writer.writerow([cell(v) for v in [
+            r["number"], r["status"], time.strftime("%Y-%m-%d %H:%M", time.localtime(r["submitted_at"])),
+            r["submitted_by"].removesuffix(" (form)"), r.get("requester_email"), r["vendor_name"], r["q_project"],
+            r.get("location"), r["needed_by"], items, r["memo"],
+            ", ".join(a["file_name"] for a in r.get("attachments") or []), r["po_doc_number"],
+        ]])
+    return Response(out.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="po-requests-{status or "all"}.csv"'})
 
 
 @app.route("/api/requests", methods=["POST"])

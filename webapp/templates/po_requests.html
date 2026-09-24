@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}PO Requests{% endblock %}
+{% block head %}<style>.page { max-width: 1440px; }</style>{% endblock %}
 {% block content %}
 <div class="card" id="rq-detail-card" style="display:none;">
   <div class="card-title-row">
@@ -7,7 +8,7 @@
     <div class="card-title-actions">
       <button type="button" class="btn-secondary" id="rq-reject-btn">Reject</button>
       <button type="button" class="btn-secondary" id="rq-reopen-btn">Reopen</button>
-      <button type="button" class="btn-primary" id="rq-create-po-btn">Review &amp; Create PO</button>
+      <button type="button" class="btn-primary" id="rq-create-po-btn">Push to PO</button>
       <button type="button" class="btn-secondary" id="rq-close-btn">Close</button>
     </div>
   </div>
@@ -21,28 +22,34 @@
 
 <div class="card">
   <div class="card-title-row">
-    <h2>Review Queue</h2>
-    <label class="hint">Show
-      <select id="rq-status-filter">
-        <option value="open">Open</option>
-        <option value="converted">Turned into POs</option>
+    <h2>Requests to Review</h2>
+    <div class="card-title-actions rq-table-tools">
+      <input type="search" id="rq-search" placeholder="Search name, vendor, project, item...">
+      <select id="rq-status-filter" aria-label="Show">
+        <option value="open">Waiting for review</option>
+        <option value="converted">Pushed to POs</option>
         <option value="rejected">Rejected</option>
         <option value="">All</option>
       </select>
-    </label>
+      <a class="btn-secondary btn-link" id="rq-export" href="/api/requests.csv?status=open">Export CSV</a>
+    </div>
   </div>
-  <table class="grid">
-    <thead><tr><th>#</th><th>Vendor</th><th>Q#/Project</th><th>Lines</th><th class="amount-cell">Est. Total</th><th>Submitted</th><th>Status</th></tr></thead>
-    <tbody id="rq-list-body"></tbody>
-  </table>
+  <p class="hint">Nothing here is in QuickBooks yet. <strong>Push to PO</strong> opens the purchase order form filled in from the request so you can check it before creating it.</p>
+  <div class="table-scroll">
+    <table class="grid rq-table">
+      <thead><tr>
+        <th></th><th>#</th><th>Submitted</th><th>Requested by</th><th>Vendor</th><th>Project</th><th>Location</th>
+        <th>Needed by</th><th>Items</th><th>Notes</th><th>Files</th><th>Status</th>
+      </tr></thead>
+      <tbody id="rq-list-body"></tbody>
+    </table>
+  </div>
   <p class="status-line" id="rq-list-status"></p>
 </div>
 
-<div class="card">
-  <div class="card-title-row">
-    <h2>New PO Request</h2>
-    <span class="hint">Goes into the review queue -- nothing is sent to QuickBooks until someone creates the PO.</span>
-  </div>
+<details class="card rq-add">
+  <summary><h2>Add a request yourself</h2></summary>
+  <p class="hint">Goes into the table above -- nothing is sent to QuickBooks until it's pushed to a PO.</p>
   <div class="field-row">
     <label class="field">
       <span>Vendor</span>
@@ -87,7 +94,7 @@
     </div>
   </div>
   <p class="status-line" id="rq-form-status"></p>
-</div>
+</details>
 
 <script src="{{ url_for('static', filename='common.js') }}"></script>
 <script src="{{ url_for('static', filename='po_requests.js') }}"></script>

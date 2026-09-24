@@ -9,6 +9,7 @@ const rq = {
   rows: [],
   nextRowId: 1,
   current: null,                 // request open in the detail card
+  list: [],                      // requests in the table (current status filter)
 };
 
 // ---------------------------------------------------------------------
@@ -193,27 +194,73 @@ function statusLabel(req) {
   if (req.status === 'converted') return `PO ${escapeHtml(req.po_doc_number || req.po_id || '')}`;
   if (req.status === 'rejected') return 'Rejected';
   const dupes = (req.similar_requests || []).length;
-  return dupes ? `Open <span class="badge-warn">possible duplicate</span>` : 'Open';
+  return dupes ? `To review <span class="badge-warn">possible duplicate</span>` : 'To review';
 }
 
 function loadQueue() {
   const status = document.getElementById('rq-status-filter').value;
-  const statusEl = document.getElementById('rq-list-status');
-  const tbody = document.getElementById('rq-list-body');
+  document.getElementById('rq-export').href = `/api/requests.csv${status ? `?status=${status}` : ''}`;
   api(`/api/requests${status ? `?status=${status}` : ''}`).then((list) => {
-    tbody.innerHTML = '';
-    statusEl.textContent = list.length ? '' : 'Nothing here.';
-    list.forEach((req) => {
-      const tr = document.createElement('tr');
-      tr.className = 'clickable-row';
-      tr.innerHTML = `<td>${req.number}</td><td>${escapeHtml(req.vendor_name)}</td><td>${escapeHtml(req.q_project)}</td>
-        <td>${req.lines.length}</td><td class="amount-cell">$${fmtMoney(requestTotal(req))}</td>
-        <td>${escapeHtml(req.submitted_by)}<br><span class="hint">${new Date(req.submitted_at * 1000).toLocaleDateString()}</span></td>
-        <td>${statusLabel(req)}</td>`;
-      tr.addEventListener('click', () => openRequest(req.number));
-      tbody.appendChild(tr);
+    rq.list = list;
+    renderQueue();
+  }).catch((e) => { document.getElementById('rq-list-status').textContent = e.message; });
+}
+
+function itemsSummary(req) {
+  return req.lines.map((l) => `${l.qty} × ${[l.item_name, l.description].filter(Boolean).join(' -- ')}`);
+}
+
+function renderQueue() {
+  const words = document.getElementById('rq-search').value.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = rq.list.filter((req) => {
+    const text = [req.number, req.submitted_by, req.requester_email, req.vendor_name, req.q_project, req.location,
+      req.memo, req.po_doc_number, ...itemsSummary(req)].join(' ').toLowerCase();
+    return words.every((w) => text.includes(w));
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  const tbody = document.getElementById('rq-list-body');
+  tbody.innerHTML = '';
+  document.getElementById('rq-list-status').textContent = shown.length
+    ? `${shown.length} request(s).` : (rq.list.length ? 'No requests match the search.' : 'Nothing here.');
+  shown.forEach((req) => {
+    const tr = document.createElement('tr');
+    tr.className = 'clickable-row';
+    const name = (req.submitted_by || '').replace(/ \(form\)$/, '');
+    const late = req.status === 'open' && req.needed_by && req.needed_by < today;
+    const files = (req.attachments || []).length;
+    tr.innerHTML = `<td><div class="rq-actions"></div></td>
+      <td>${req.number}</td>
+      <td class="nowrap">${new Date(req.submitted_at * 1000).toLocaleDateString()}</td>
+      <td>${escapeHtml(name)}${req.requester_email ? `<br><a href="mailto:${escapeHtml(req.requester_email)}" class="hint">${escapeHtml(req.requester_email)}</a>` : ''}</td>
+      <td>${escapeHtml(req.vendor_name)}</td>
+      <td>${escapeHtml(req.q_project)}</td>
+      <td>${escapeHtml(req.location)}</td>
+      <td class="nowrap${late ? ' late' : ''}">${escapeHtml(req.needed_by)}</td>
+      <td class="rq-items">${itemsSummary(req).map(escapeHtml).join('<br>')}</td>
+      <td class="rq-notes">${escapeHtml(req.memo)}</td>
+      <td>${files || ''}</td>
+      <td>${statusLabel(req)}</td>`;
+    const actions = tr.querySelector('.rq-actions');
+    if (req.status === 'open') {
+      actions.append(
+        actionButton('Push to PO', 'btn-primary', () => { window.location = `/?request=${req.number}`; }),
+        actionButton('Reject', 'btn-link-danger', () => rejectRequest(req.number)),
+      );
+    }
+    tr.addEventListener('click', (e) => {
+      if (!e.target.closest('button, a')) openRequest(req.number);
     });
-  }).catch((e) => { statusEl.textContent = e.message; });
+    tbody.appendChild(tr);
+  });
+}
+
+function actionButton(label, cls, onClick) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `${cls} btn-small`;
+  btn.textContent = label;
+  btn.addEventListener('click', onClick);
+  return btn;
 }
 
 function openRequest(number) {
@@ -291,10 +338,18 @@ function checkQuickBooks(req) {
     .catch((e) => { if (rq.current && rq.current.number === req.number) renderDuplicates(req, { error: e.message }); });
 }
 
-function setStatusOfCurrent(status, note) {
-  api(`/api/requests/${rq.current.number}/status`, { method: 'POST', body: JSON.stringify({ status, note }) })
-    .then(() => { openRequest(rq.current.number); loadQueue(); })
+function setStatus(number, status, note) {
+  return api(`/api/requests/${number}/status`, { method: 'POST', body: JSON.stringify({ status, note }) })
+    .then(() => {
+      loadQueue();
+      if (rq.current && rq.current.number === number) openRequest(number);
+    })
     .catch((e) => alert(e.message));
+}
+
+function rejectRequest(number) {
+  const note = prompt(`Reject request #${number}? Optional reason (e.g. "duplicate of #12"):`, '');
+  if (note !== null) setStatus(number, 'rejected', note);
 }
 
 function setupQueue() {
@@ -306,12 +361,9 @@ function setupQueue() {
   document.getElementById('rq-create-po-btn').addEventListener('click', () => {
     window.location = `/?request=${rq.current.number}`;
   });
-  document.getElementById('rq-reject-btn').addEventListener('click', () => {
-    const note = prompt(`Reject request #${rq.current.number}? Optional reason (e.g. "duplicate of #12"):`, '');
-    if (note === null) return;
-    setStatusOfCurrent('rejected', note);
-  });
-  document.getElementById('rq-reopen-btn').addEventListener('click', () => setStatusOfCurrent('open', ''));
+  document.getElementById('rq-reject-btn').addEventListener('click', () => rejectRequest(rq.current.number));
+  document.getElementById('rq-reopen-btn').addEventListener('click', () => setStatus(rq.current.number, 'open', ''));
+  document.getElementById('rq-search').addEventListener('input', renderQueue);
 }
 
 // ---------------------------------------------------------------------
