@@ -17,7 +17,7 @@ wasp_config.json next to this file (gitignored):
 
     WASP_BASE_URL   e.g. https://yourcompany.waspinventorycloud.com
     WASP_API_TOKEN  the API token from WASP (Settings -> Access Tokens)
-    WASP_SITE_NAME  the WASP site the locations belong to
+    WASP_SITE_NAME  the WASP site the locations belong to (default: Hardware)
 
 Usage:
 
@@ -60,7 +60,7 @@ def load_settings(args):
 
     base_url = pick(args.base_url, "WASP_BASE_URL", "base_url")
     token = os.environ.get("WASP_API_TOKEN") or file_cfg.get("api_token")
-    site = pick(args.site, "WASP_SITE_NAME", "site_name")
+    site = pick(args.site, "WASP_SITE_NAME", "site_name") or "Hardware"
     return (base_url or "").rstrip("/"), token, site
 
 
