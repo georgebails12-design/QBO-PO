@@ -21,10 +21,13 @@ wasp_config.json next to this file (gitignored):
 
 Usage:
 
-    # Dry run (default): shows exactly what would be sent, sends nothing
+    # Dry run (default): shows exactly what would be sent, contacts nothing
     python wasp_add_backs.py add_backs_2026-09-25.csv
 
-    # Actually post to WASP
+    # Look up current WASP stock for every row (read-only)
+    python wasp_add_backs.py add_backs_2026-09-25.csv --check
+
+    # Check stock, then post adds -- only for items WASP already has
     python wasp_add_backs.py add_backs_2026-09-25.csv --commit
 
 Rows with something in the `check` column are skipped unless you pass
@@ -43,6 +46,7 @@ import requests
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(APP_DIR, "wasp_config.json")
 ADD_PATH = "/public-api/transactions/item/add"
+SEARCH_PATH = "/public-api/ic/item/advancedinventorysearch"
 
 
 class WaspError(Exception):
@@ -93,15 +97,15 @@ def build_record(row, site, notes, date_acquired):
     }
 
 
-def post_add(base_url, token, records):
+def _post(base_url, token, path, payload):
     resp = requests.post(
-        base_url + ADD_PATH,
+        base_url + path,
         headers={
             "Authorization": "Bearer " + token,
             "Content-Type": "application/json",
             "Accept": "application/json",
         },
-        json=records,
+        json=payload,
         timeout=30,
     )
     try:
@@ -117,10 +121,75 @@ def post_add(base_url, token, records):
     return body
 
 
+def post_add(base_url, token, records):
+    return _post(base_url, token, ADD_PATH, records)
+
+
+def _qty(rec):
+    for key in ("TotalAvailable", "QuantityAvailable", "TotalInHouse",
+                "QuantityInHouse", "Quantity"):
+        if rec.get(key) is not None:
+            return float(rec[key])
+    return None
+
+
+def lookup_inventory(base_url, token, item_number, debug=False):
+    """Return WASP inventory records (one per site/location) for an item.
+
+    Filters client-side on an exact ItemNumber match (case-insensitive),
+    since the search itself can return partial matches.
+    """
+    body = _post(base_url, token, SEARCH_PATH,
+                 {"SearchPattern": item_number, "PageSize": 100, "PageNumber": 1})
+    if debug:
+        print("    raw: " + json.dumps(body)[:1500])
+    data = body.get("Data") if isinstance(body, dict) else body
+    if isinstance(data, dict):
+        data = data.get("Items") or data.get("Records") or [data]
+    want = item_number.strip().lower()
+    return [d for d in (data or [])
+            if isinstance(d, dict) and str(d.get("ItemNumber", "")).strip().lower() == want]
+
+
+def check_rows(base_url, token, site, rows, debug=False):
+    """Print current stock for each row; return the rows whose item exists in WASP."""
+    print(f"{'line':>4}  {'item':<24} {'location':<16} {'add':>4}  "
+          f"{'at loc now':>10}  {'after':>6}  {'item total':>10}  status")
+    found = []
+    for r in rows:
+        try:
+            recs = lookup_inventory(base_url, token, r["item_number"], debug)
+        except (WaspError, requests.RequestException) as e:
+            print(f"{r['line']:>4}  {r['item_number']:<24} {r['location_code']:<16} "
+                  f"{r['quantity']:>4g}  LOOKUP FAILED: {e}")
+            continue
+        if not recs:
+            print(f"{r['line']:>4}  {r['item_number']:<24} {r['location_code']:<16} "
+                  f"{r['quantity']:>4g}  {'-':>10}  {'-':>6}  {'-':>10}  ITEM NOT FOUND")
+            continue
+        found.append(r)
+        total = sum(q for q in (_qty(x) for x in recs) if q is not None)
+        here = [x for x in recs
+                if str(x.get("SiteName", "")).lower() == site.lower()
+                and str(x.get("LocationCode", "")).lower() == r["location_code"].lower()]
+        now = sum(q for q in (_qty(x) for x in here) if q is not None)
+        status = "ok" if here else "new location for this item"
+        print(f"{r['line']:>4}  {r['item_number']:<24} {r['location_code']:<16} "
+              f"{r['quantity']:>4g}  {now:>10g}  {now + r['quantity']:>6g}  {total:>10g}  {status}")
+        if not here:
+            locs = ", ".join(f"{x.get('SiteName')}/{x.get('LocationCode')}" for x in recs)
+            print(f"{'':>6}currently stocked at: {locs}")
+    return found
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[1])
     ap.add_argument("csv_file")
-    ap.add_argument("--commit", action="store_true", help="actually post to WASP")
+    ap.add_argument("--check", action="store_true",
+                    help="look up current WASP stock for each row; posts nothing")
+    ap.add_argument("--commit", action="store_true",
+                    help="check stock, then post adds for items that already exist")
+    ap.add_argument("--debug", action="store_true", help="print raw lookup responses")
     ap.add_argument("--include-flagged", action="store_true",
                     help="also send rows that have a note in the `check` column")
     ap.add_argument("--site", help="WASP site name (overrides WASP_SITE_NAME)")
@@ -138,16 +207,17 @@ def main():
     skipped = [r for r in rows if r not in to_send]
 
     print(f"{len(rows)} rows read, {len(to_send)} to send, {len(skipped)} flagged/skipped")
-    print(f"Site: {site or '(NOT SET)'}   Mode: {'COMMIT' if args.commit else 'DRY RUN'}\n")
+    print(f"Site: {site or '(NOT SET)'}   Mode: {'COMMIT' if args.commit else 'CHECK (read-only)' if args.check else 'DRY RUN'}\n")
     for r in skipped:
         print(f"  SKIP  line {r['line']:>2}  {r['item_number']:<22} {r['location_code']:<16} "
               f"x{r['quantity']:g}   <- {r['check']}")
 
-    if not args.commit:
+    if not (args.check or args.commit):
         print("\nWould send:")
         for r in to_send:
             print("  " + json.dumps(build_record(r, site, notes, date_acquired)))
-        print("\nDry run only. Re-run with --commit to post to WASP.")
+        print("\nDry run only. Run with --check to see current WASP stock, "
+              "or --commit to post.")
         return 0
 
     missing = [n for n, v in (("WASP_BASE_URL", base_url), ("WASP_API_TOKEN", token),
@@ -156,9 +226,18 @@ def main():
         print("Missing settings: " + ", ".join(missing), file=sys.stderr)
         return 2
 
+    print("Current WASP stock:")
+    existing = check_rows(base_url, token, site, to_send, args.debug)
+    not_found = [r for r in to_send if r not in existing]
+    if args.check:
+        print(f"\n{len(existing)} of {len(to_send)} items found in WASP. Nothing posted.")
+        return 0
+
+    # Only add to items WASP already has -- these are add-backs, not new items.
+    print(f"\nPosting {len(existing)} adds ({len(not_found)} not found in WASP, not sent):")
     # One row per request so a bad item/location only fails that row.
     ok, failed = 0, []
-    for r in to_send:
+    for r in existing:
         label = f"line {r['line']:>2}  {r['item_number']:<22} {r['location_code']:<16} x{r['quantity']:g}"
         try:
             post_add(base_url, token, [build_record(r, site, notes, date_acquired)])
@@ -168,8 +247,9 @@ def main():
             failed.append((r, str(e)))
             print(f"  FAIL  {label}   {e}")
 
-    print(f"\n{ok} added, {len(failed)} failed, {len(skipped)} skipped (flagged)")
-    return 1 if failed else 0
+    print(f"\n{ok} added, {len(failed)} failed, {len(not_found)} not in WASP, "
+          f"{len(skipped)} skipped (flagged)")
+    return 1 if failed or not_found else 0
 
 
 if __name__ == "__main__":
