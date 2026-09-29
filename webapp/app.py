@@ -2,7 +2,7 @@
 app.py
 ======
 Web version of the QuickBooks Purchase Order tool -- same qbo_client.py /
-glass_pdf_parser.py / cardinal_glass_output.py business logic as the
+glass_pdf_parser.py / glass_reorder_parser.py / cardinal_glass_output.py business logic as the
 desktop app, behind individual logins, reachable by URL.
 
 Run with:
@@ -28,6 +28,7 @@ from flask import Flask, Response, jsonify, redirect, render_template, request, 
 import auth
 import cardinal_glass_output
 import glass_pdf_parser
+import glass_reorder_parser
 import qbo_client
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -334,7 +335,11 @@ def api_glass_pdf_parse():
         file.save(tmp.name)
         tmp_path = tmp.name
     try:
-        parsed = glass_pdf_parser.parse_glass_pdf(tmp_path)
+        raw_text = glass_pdf_parser.extract_text(tmp_path)
+        if glass_reorder_parser.is_reorder_form(raw_text):
+            parsed = glass_reorder_parser.parse_reorder_text(raw_text)
+        else:
+            parsed = glass_pdf_parser.parse_glass_pdf(tmp_path)
     except ValueError as exc:
         return err(exc)
     finally:

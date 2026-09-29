@@ -2,7 +2,7 @@
 
 Browser-based version of the QuickBooks Purchase Order tool, behind
 individual logins. Same business logic as the desktop app
-(`qbo_client.py`, `glass_pdf_parser.py`, `cardinal_glass_output.py`),
+(`qbo_client.py`, `glass_pdf_parser.py`, `glass_reorder_parser.py`, `cardinal_glass_output.py`),
 different front end.
 
 ## Local setup

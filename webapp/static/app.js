@@ -437,8 +437,15 @@ function renderGlassReview(parsed) {
   if (parsed.project_name) bits.push(`Project: ${parsed.project_name}`);
   if (parsed.job) bits.push(`Job #: ${parsed.job}`);
   if (parsed.jdm) bits.push(`JDM: ${parsed.jdm}`);
-  document.getElementById('glass-summary').textContent =
-    (bits.join('   ') || 'Parsed glass breakdown') + ` -- ${parsed.units.length} unit(s) found.`;
+  if (parsed.form === 'reorder') {
+    bits.unshift('Glass Reorder Form');
+    if (parsed.order_date) bits.push(`Ordered: ${parsed.order_date}`);
+    if (parsed.target_ship_date) bits.push(`Target ship: ${parsed.target_ship_date}`);
+    if (parsed.reason) bits.push(`Reason: ${parsed.reason}`);
+  }
+  let summary = (bits.join('   ') || 'Parsed glass breakdown') + ` -- ${parsed.units.length} unit(s) found.`;
+  if (parsed.form_flags && parsed.form_flags.length) summary += ` Check: ${parsed.form_flags.join(' ')}`;
+  document.getElementById('glass-summary').textContent = summary;
 
   const catNames = Object.keys(state.categories).sort();
   const catSel = document.getElementById('glass-category');
