@@ -43,14 +43,16 @@ START_DATE = "2025-01-01"
 CUSTOM_FIELD_PARAMS = {"include": "enhancedAllCustomFields", "minorversion": "75"}
 
 # RSM dropdown option id -> name. Ids missing here show as "Unmapped RSM #<id>".
-# 9, 14, 16 and 22 confirmed by George (Oct 2026); 16 was previously "Tyler".
+# 5, 8, 9, 14, 16, 17, 19, 20 and 22 confirmed by George (Oct 2026); 16 was previously "Tyler".
 RSM_NAMES = {
     "1": "Avi Shoshan",
     "2": "Efrain",
     "3": "Trever",
     "4": "Emanuel Teral(Alex)",
+    "5": "Jarron",
     "6": "Derrick",
     "7": "Troy",
+    "8": "Cassandra",
     "9": "Luke",
     "10": "Private Label",
     "11": "Sean",
@@ -59,7 +61,10 @@ RSM_NAMES = {
     "14": "Tad",
     "15": "Spencer",
     "16": "Mary",
+    "17": "Kevin",
     "18": "Tyler",
+    "19": "Jesse",
+    "20": "Joe Smith",
     "22": "Jameson",
     "23": "David Rodriquez",
     "24": "William",
