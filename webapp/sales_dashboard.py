@@ -17,8 +17,8 @@ invoice(s) it was applied to, split in proportion to the amounts applied;
 cash not applied to any invoice is shown as "Not applied to an invoice".
 
 RSM is the "RSM" dropdown custom field on each invoice. The API returns the
-dropdown option's id, not its label, so RSM_NAMES maps ids to names (same
-list the n8n "QBO - Weekly Overdue AR by RSM" workflow uses).
+dropdown option's id, not its label, so RSM_NAMES maps ids to names
+(Custom_Field_Mapping.xlsx plus ids confirmed since).
 
 Pulling every transaction takes a while, so the result is cached to
 sales_dashboard_cache.json (gitignored) and rebuilt by a background job the
@@ -42,7 +42,8 @@ START_DATE = "2025-01-01"
 # newer dropdown custom fields like RSM on invoices at all.
 CUSTOM_FIELD_PARAMS = {"include": "enhancedAllCustomFields", "minorversion": "75"}
 
-# RSM dropdown option id -> name. Ids missing here show as "Unmapped (<id>)".
+# RSM dropdown option id -> name. Ids missing here show as "Unmapped RSM #<id>".
+# 9, 14, 16 and 22 confirmed by George (Oct 2026); 16 was previously "Tyler".
 RSM_NAMES = {
     "1": "Avi Shoshan",
     "2": "Efrain",
@@ -50,13 +51,16 @@ RSM_NAMES = {
     "4": "Emanuel Teral(Alex)",
     "6": "Derrick",
     "7": "Troy",
+    "9": "Luke",
     "10": "Private Label",
     "11": "Sean",
     "12": "Service",
     "13": "Stefan",
+    "14": "Tad",
     "15": "Spencer",
-    "16": "Tyler",
+    "16": "Mary",
     "18": "Tyler",
+    "22": "Jameson",
     "23": "David Rodriquez",
     "24": "William",
 }
