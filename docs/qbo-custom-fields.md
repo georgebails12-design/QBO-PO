@@ -7,7 +7,7 @@ _Last updated: October 2026._
 
 ## Reading custom fields from the API
 
-RSM, 2nd RSM, Dealer and the other fields below are QBO's newer **dropdown custom fields**. Two things to know:
+RSM and the other dropdown fields below are QBO's newer **dropdown custom fields**. Two things to know:
 
 1. **They only come back if you ask for them.** Add `include=enhancedAllCustomFields` and `minorversion=75` (70 or higher) to the request; without them most of these fields are missing from the response.
 2. **Dropdowns return the option's number, not its label.** `StringValue` is `"11"`, not `"Sean"`. Use the tables below to turn numbers into names.
@@ -34,11 +34,11 @@ Match on `Name` (trim it: `"Customer PO "` has a trailing space) or on `Definiti
 | Q Number/PO # | `1000000016` | Text | Job / quote number; matches monday Q# and SO# |
 | Sales Rep | `1000000017` | Text | Older field, rarely used (initials) |
 | Residential or Commercial | `1000000019` | Dropdown | See list below |
-| Dealer | `1000000020` | Dropdown | See list below |
+| Dealer | `1000000020` | Dropdown | Labels not documented here |
 | Sales Team | `1000000021` | Dropdown | Labels not documented |
 | Outside Sales Rep | `1000000022` | Dropdown | Labels not documented |
 | RSM | `1000000027` | Dropdown | See list below; on ~99% of invoices |
-| 2nd RSM | `1000000028` | Dropdown | Separate list with different numbers from RSM |
+| 2nd RSM | `1000000028` | Dropdown | Separate list with different numbers from RSM; labels not documented here |
 | Q#/Project | `1000000029` | Text | On invoices: rare. On purchase orders the Q#/Project field is DefinitionId `2` |
 | JDM Folder | `1000000030` | Text |  |
 | Customer PO | `1000000033` | Text | Name has a trailing space in QBO |
@@ -82,24 +82,6 @@ Notes:
 - A blank RSM shows as "No RSM on invoice" on the dashboard (about 1% of invoices).
 - Spellings follow QuickBooks/the mapping sheet: "Trever", "Jarron" and "David Rodriquez". monday.com spells them Trevor, Jaron and Rodriguez.
 
-## 2nd RSM
-
-`DefinitionId` `1000000028`. **Different numbering from RSM**: 2nd RSM #1 is Efrain, but RSM #1 is Avi.
-
-| # | Name |
-|---|---|
-| 1 | Efrain |
-| 2 | Trever |
-| 6 | Derrick |
-| 10 | Sean |
-| 11 | Stefan |
-| 16 | NO |
-| 17 | Efrain/Trever |
-| 19 | Tyler |
-| 20 | Greg Brawner |
-
-Numbers 3, 4, 7, 8, 12, 13, 14 and 15 also appear on invoices but have no confirmed label yet. #8 is used on about 70 invoices; monday.com mostly matches it to Mary Wursten, but that is unconfirmed.
-
 ## Residential or Commercial
 
 `DefinitionId` `1000000019`.
@@ -119,109 +101,6 @@ Numbers 3, 4, 7, 8, 12, 13, 14 and 15 also appear on invoices but have no confir
 | 11 | Retail |
 | 12 | Showroom |
 | 13 | Goverment |
-
-## Dealer
-
-`DefinitionId` `1000000020`. Numbers 1–24 come from the mapping sheet. The sheet lists the remaining dealers without numbers; they are listed here in sheet order, but their option numbers are **not confirmed**.
-
-| # | Dealer |
-|---|---|
-| 1 | NO |
-| 2 | Alanor Ventanas (inactive) |
-| 3 | Arcadia Sash and Door |
-| 4 | Builders Direct |
-| 5 | Home Depot |
-| 6 | J Shuman Door Installations |
-| 7 | Lowes |
-| 8 | Marsh Building Products (inactive) |
-| 9 | Precision Glass |
-| 10 | Reeves Ace Hardware |
-| 11 | Sierra Pacific |
-| 12 | Tier One Custom Windows |
-| 13 | Wenatchee Valley Glass |
-| 14 | West Coast Window (inactive) |
-| 15 | The Window Store |
-| 16 | Wood Masters Construction Inc. |
-| 17 | JS Glass & Mirror, Inc |
-| 18 | Ken Caryl Glass Inc |
-| 19 | Polk Architectural |
-| 20 | E & Z Glass & Window |
-| 21 | Blue Fenestration |
-| 22 | J & A Glass & Mirror, Inc |
-| 23 | Hilton Head Island Windows & Doors |
-| 24 | Fast Glass |
-| ? | Dixie Line Lumber |
-| ? | Specialty North America (inactive) |
-| ? | BMG Door & Glass |
-| ? | Hardman Glazing |
-| ? | 1st Choice Window & Door |
-| ? | 4x4 Construction |
-| ? | Action Windows and Doors |
-| ? | Architectural Window & Door |
-| ? | AWD Systems |
-| ? | Benchmark Window & Door |
-| ? | BlackRock Southwest Development |
-| ? | Bluestem Fenestration |
-| ? | Boulder Ridge |
-| ? | Clerestory |
-| ? | Desert Lumber and Building Materials |
-| ? | Designer Windows and Doors Ltd |
-| ? | Donatello Bonasera Development |
-| ? | Don's Mobile Glass |
-| ? | Doors, Etc. |
-| ? | E&Z Glass & Window |
-| ? | Eagle Windows & Doors |
-| ? | Ecotech Windows, Doors, Glass |
-| ? | Epsilon |
-| ? | EuroVision Glass |
-| ? | Evergreen Premier |
-| ? | Exclusive Iron Doors |
-| ? | Folding Door Store |
-| ? | Four Corners Building Supply |
-| ? | Frontier Glass |
-| ? | Hammer Building Supply |
-| ? | Harbour Classic custom homes |
-| ? | HBS, Inc. |
-| ? | Houck Construction |
-| ? | JDF Industries |
-| ? | JS Glass |
-| ? | Ken Carl Glass |
-| ? | McCoy's Building Supply |
-| ? | Michigan Window & Door |
-| ? | Northland Interiors |
-| ? | Peak Glass |
-| ? | Polk Architecture |
-| ? | Quality Window & Door |
-| ? | R & S Companies |
-| ? | Riverwoods Mill |
-| ? | Rocky Mountain Windows & Doors |
-| ? | Sergi's Images |
-| ? | Skyline Window |
-| ? | Sol Installs |
-| ? | Sound Glass |
-| ? | Stratos Development |
-| ? | Studio 3 Architectural |
-| ? | Super Enterprises/ Lavitt Group |
-| ? | The Coastal Window & Door Center |
-| ? | Tridel Co. |
-| ? | Turkel Systems |
-| ? | Window Classics |
-| ? | Window Craft Inc |
-| ? | Z Double B |
-| ? | Desert Windows Systems |
-| ? | Best Window Company |
-| ? | Westline WIndows |
-| ? | Epic Design Group Inc |
-| ? | Western Pacific |
-| ? | Marvin Design Gallery |
-| ? | AS Designs |
-| ? | Advanced Window |
-| ? | Builders First Source |
-| ? | OC Patio Doors |
-| ? | Socal Windows & Glazing |
-| ? | JDP Associates |
-| ? | Scanlon Construction |
-| ? | Integrated Door and Window Systems, Inc. |
 
 ## Sales and cash definitions (Sales Dashboard)
 
