@@ -177,7 +177,7 @@ def _get(path, params=None):
     access_token, realm_id, environment = get_valid_access_token()
     url = f"{_api_base(environment, realm_id)}/{path}"
     query = dict(params or {})
-    query["minorversion"] = MINOR_VERSION
+    query.setdefault("minorversion", MINOR_VERSION)
     resp = requests.get(url, headers=_headers(access_token), params=query, timeout=30)
     if resp.status_code != 200:
         raise QBOError(f"QuickBooks GET {path} failed ({resp.status_code}): {resp.text}")
@@ -196,14 +196,15 @@ def _post(path, payload):
     return resp.json()
 
 
-def _query(sql):
-    """Run a QBO SQL-like query, transparently paging through all results."""
+def _query(sql, params=None):
+    """Run a QBO SQL-like query, transparently paging through all results.
+    params: extra query-string parameters (e.g. include=enhancedAllCustomFields)."""
     results = []
     start = 1
     page_size = 1000
     while True:
         paged_sql = f"{sql} STARTPOSITION {start} MAXRESULTS {page_size}"
-        data = _get("query", params={"query": paged_sql})
+        data = _get("query", params={**(params or {}), "query": paged_sql})
         query_response = data.get("QueryResponse", {})
         entity_key = next((k for k in query_response if k != "startPosition" and k != "maxResults" and k != "totalCount"), None)
         rows = query_response.get(entity_key, []) if entity_key else []

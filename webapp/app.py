@@ -29,6 +29,7 @@ import auth
 import cardinal_glass_output
 import glass_pdf_parser
 import qbo_client
+import sales_dashboard
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_DIR = os.path.join(APP_DIR, "downloads")
@@ -70,6 +71,9 @@ TOKEN_LOCK = threading.Lock()  # serialize QBO token refreshes across concurrent
 
 REFRESH_JOBS = {}
 REFRESH_LOCK = threading.Lock()
+
+SALES_JOBS = {}
+SALES_LOCK = threading.Lock()
 
 
 def err(message, code=400):
@@ -120,6 +124,12 @@ def purchase_orders_page():
     return render_template("view_purchase_orders.html", user=auth.current_user())
 
 
+@app.route("/sales")
+@auth.login_required
+def sales_dashboard_page():
+    return render_template("sales_dashboard.html", user=auth.current_user())
+
+
 # ---------------------------------------------------------------------------
 # Reference data (vendors/items/accounts/customers) -- cached like the
 # desktop app; refreshing is slow (thousands of records) so it runs as a
@@ -167,6 +177,52 @@ def api_reference_refresh():
 def api_reference_refresh_status(job_id):
     with REFRESH_LOCK:
         job = REFRESH_JOBS.get(job_id)
+    if not job:
+        return err("Unknown job id.", 404)
+    return jsonify(job)
+
+
+# ---------------------------------------------------------------------------
+# Sales dashboard -- monthly sales and cash collected by RSM. Built from every
+# invoice/payment since sales_dashboard.START_DATE, so it's cached and rebuilt
+# by a background job the page polls (one job at a time).
+# ---------------------------------------------------------------------------
+@app.route("/api/sales-dashboard")
+@auth.login_required
+def api_sales_dashboard():
+    return jsonify(sales_dashboard.load_cache() or {})
+
+
+@app.route("/api/sales-dashboard/refresh", methods=["POST"])
+@auth.login_required
+def api_sales_dashboard_refresh():
+    with SALES_LOCK:
+        running = next((jid for jid, job in SALES_JOBS.items() if job["status"] == "running"), None)
+        if running:
+            return jsonify({"job_id": running})
+        job_id = uuid.uuid4().hex
+        SALES_JOBS[job_id] = {"status": "running", "error": None}
+
+    def work():
+        try:
+            with TOKEN_LOCK:
+                qbo_client.get_valid_access_token()
+            sales_dashboard.refresh_cache()
+            with SALES_LOCK:
+                SALES_JOBS[job_id] = {"status": "done", "error": None}
+        except Exception as exc:  # noqa: BLE001
+            with SALES_LOCK:
+                SALES_JOBS[job_id] = {"status": "error", "error": str(exc)}
+
+    threading.Thread(target=work, daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/api/sales-dashboard/refresh/<job_id>")
+@auth.login_required
+def api_sales_dashboard_refresh_status(job_id):
+    with SALES_LOCK:
+        job = SALES_JOBS.get(job_id)
     if not job:
         return err("Unknown job id.", 404)
     return jsonify(job)

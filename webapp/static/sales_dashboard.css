@@ -1,0 +1,70 @@
+/* Sales Dashboard page. Series colors: slot 1 (blue) = Sales, slot 2 (orange) = Cash collected. */
+:root {
+  --series-sales: #2a78d6;
+  --series-cash: #eb6834;
+  --grid-line: #eceef1;
+}
+
+.sd-filters .field { flex: 0 0 260px; }
+.sd-body { transition: opacity 0.15s; }
+.sd-body.loading { opacity: 0.5; }
+
+.sd-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+.sd-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.sd-tile-label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.sd-tile-value { font-size: 26px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.sd-tile-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; min-height: 15px; }
+
+.sd-legend { display: flex; gap: 16px; font-size: 12.5px; color: var(--text-muted); }
+.sd-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sd-key { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+.sd-key-sales { background: var(--series-sales); }
+.sd-key-cash { background: var(--series-cash); }
+
+.sd-chart-wrap { position: relative; width: 100%; }
+.sd-chart-wrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+.sd-chart-wrap .axis-label { font-size: 11px; fill: var(--text-muted); font-variant-numeric: tabular-nums; }
+.sd-chart-wrap .grid-line { stroke: var(--grid-line); stroke-width: 1; }
+.sd-chart-wrap .baseline { stroke: var(--border); stroke-width: 1; }
+.sd-chart-wrap .bar-sales { fill: var(--series-sales); }
+.sd-chart-wrap .bar-cash { fill: var(--series-cash); }
+.sd-chart-wrap .month-hit { fill: transparent; cursor: pointer; }
+.sd-chart-wrap .month-hit:hover, .sd-chart-wrap .month-hit:focus { fill: rgba(31, 111, 92, 0.06); outline: none; }
+.sd-chart-wrap .month-hit.selected { fill: rgba(31, 111, 92, 0.10); }
+.sd-chart-wrap .month-label.selected { fill: var(--text); font-weight: 700; }
+
+.sd-tooltip {
+  position: fixed; z-index: 30; pointer-events: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.10); padding: 8px 10px; font-size: 12.5px; min-width: 170px;
+}
+.sd-tooltip .tt-title { font-weight: 600; color: var(--text-muted); margin-bottom: 4px; }
+.sd-tooltip .tt-row { display: flex; align-items: center; gap: 8px; }
+.sd-tooltip .tt-row b { font-variant-numeric: tabular-nums; color: var(--text); min-width: 90px; text-align: right; }
+.sd-tooltip .tt-row span { color: var(--text-muted); }
+.sd-tooltip .tt-key { width: 12px; height: 2px; border-radius: 1px; }
+
+.sd-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.sd-table th.num, .sd-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.sd-table td { padding: 7px 6px; border-bottom: 1px solid var(--grid-line); }
+.sd-table tbody tr.clickable { cursor: pointer; }
+.sd-table tbody tr.clickable:hover { background: #eef6f3; }
+.sd-table tbody tr.active { background: #e3f1ec; font-weight: 600; }
+.sd-table tfoot td { font-weight: 700; padding: 8px 6px; border-top: 1px solid var(--border); }
+.sd-table .neg { color: var(--danger); }
+.sd-bar-col { width: 28%; }
+.sd-minibar { display: flex; flex-direction: column; gap: 3px; padding-top: 3px; }
+.sd-minibar i { display: block; height: 6px; border-radius: 0 3px 3px 0; min-width: 1px; }
+.sd-minibar i.s { background: var(--series-sales); }
+.sd-minibar i.c { background: var(--series-cash); }
+.sd-footnote { margin-top: -4px; }
+
+@media (max-width: 900px) {
+  .sd-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sd-bar-col, .sd-table td.sd-bar-cell { display: none; }
+}
+@media (max-width: 640px) {
+  .sd-filters .field { flex: 1 1 auto; }
+  .sd-tile-value { font-size: 21px; }
+  .sd-table { font-size: 12.5px; }
+}

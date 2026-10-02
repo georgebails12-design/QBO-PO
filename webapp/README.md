@@ -85,3 +85,25 @@ export. The one difference: reference data (vendors/items/accounts/
 customers) is refreshed on-demand via a background job polled from the
 page, since QuickBooks paginates at 1000 records/request and this
 company's lists are large (thousands of each).
+
+## Sales Dashboard
+
+The **Sales Dashboard** tab (`/sales`) shows sales and cash collected by
+month, with slicers for RSM and month (or full year). Everything comes
+read-only from QuickBooks (`sales_dashboard.py`):
+
+- **Sales** = invoice lines that post to an Income account, by invoice
+  date, less credit memos. Deposit invoices (2115 Customer Deposits) and
+  sales tax are left out; summing invoice totals would count every deposit
+  twice.
+- **Cash collected** = customer payments by payment date, credited to the
+  RSM on the invoice(s) each payment was applied to. $0 payments that only
+  apply journal-entry or credit-memo credits add nothing.
+- **RSM** is the invoice's "RSM" dropdown custom field. QuickBooks returns
+  the option id, so `RSM_NAMES` in `sales_dashboard.py` maps ids to names;
+  ids not in that list show as "Unmapped RSM #n" until they're added.
+
+It covers everything since `START_DATE` (Jan 2025) -- a few thousand
+transactions -- so the page reads a cache (`sales_dashboard_cache.json`,
+gitignored) and the **Refresh from QuickBooks** button rebuilds it in the
+background (about a minute).

@@ -2,6 +2,8 @@
 qbo_config.json
 qbo_tokens.json
 qbo_reference_cache.json
+sales_dashboard_cache.json
+sales_dashboard_cache.json.tmp
 
 # Local login accounts -- never commit real credentials
 users.json

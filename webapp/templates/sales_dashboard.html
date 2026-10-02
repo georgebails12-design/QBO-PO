@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Sales Dashboard{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='sales_dashboard.css') }}">
+{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-title-row">
+    <h2>Sales &amp; Cash Collected</h2>
+    <div class="card-title-actions">
+      <span class="hint" id="sd-as-of"></span>
+      <button type="button" class="btn-secondary" id="sd-refresh-btn">Refresh from QuickBooks</button>
+    </div>
+  </div>
+  <div class="field-row sd-filters">
+    <label class="field">RSM
+      <select id="sd-rsm"></select>
+    </label>
+    <label class="field">Month
+      <select id="sd-month"></select>
+    </label>
+  </div>
+  <p class="status-line" id="sd-status"></p>
+</div>
+
+<div id="sd-body" class="sd-body">
+  <div class="sd-tiles">
+    <div class="sd-tile"><div class="sd-tile-label">Sales</div><div class="sd-tile-value" id="sd-kpi-sales">-</div><div class="sd-tile-sub" id="sd-kpi-sales-sub"></div></div>
+    <div class="sd-tile"><div class="sd-tile-label">Cash collected</div><div class="sd-tile-value" id="sd-kpi-cash">-</div><div class="sd-tile-sub" id="sd-kpi-cash-sub"></div></div>
+    <div class="sd-tile"><div class="sd-tile-label">Invoices</div><div class="sd-tile-value" id="sd-kpi-count">-</div><div class="sd-tile-sub" id="sd-kpi-count-sub"></div></div>
+    <div class="sd-tile"><div class="sd-tile-label">Cash / sales</div><div class="sd-tile-value" id="sd-kpi-ratio">-</div><div class="sd-tile-sub">cash collected as a share of sales</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title-row">
+      <h2 id="sd-chart-title">By month</h2>
+      <div class="sd-legend">
+        <span><i class="sd-key sd-key-sales"></i>Sales</span>
+        <span><i class="sd-key sd-key-cash"></i>Cash collected</span>
+      </div>
+    </div>
+    <div class="sd-chart-wrap" id="sd-chart"></div>
+    <div class="sd-tooltip" id="sd-tooltip" role="status" hidden></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title-row"><h2 id="sd-rsm-title">By RSM</h2></div>
+    <div class="sd-scroll"><table class="grid sd-table">
+      <thead><tr><th>RSM</th><th class="num">Invoices</th><th class="num">Sales</th><th class="num">Cash collected</th><th class="sd-bar-col"></th></tr></thead>
+      <tbody id="sd-rsm-body"></tbody>
+    </table></div>
+    <p class="hint">Click an RSM to filter the whole page to them.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title-row"><h2 id="sd-month-title">Month by month</h2></div>
+    <div class="sd-scroll"><table class="grid sd-table">
+      <thead><tr><th>Month</th><th class="num">Invoices</th><th class="num">Sales</th><th class="num">Cash collected</th><th class="num">Difference</th></tr></thead>
+      <tbody id="sd-month-body"></tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title-row"><h2 id="sd-inv-title">Invoices</h2></div>
+    <div class="sd-scroll"><table class="grid sd-table">
+      <thead><tr><th>Invoice #</th><th>Date</th><th>Customer</th><th>RSM</th><th class="num">Sales</th><th class="num">Invoice total</th><th class="num">Open balance</th></tr></thead>
+      <tbody id="sd-inv-body"></tbody>
+    </table></div>
+    <p class="hint" id="sd-inv-hint"></p>
+    <button type="button" class="btn-secondary" id="sd-inv-more" hidden>Show all</button>
+  </div>
+
+  <p class="hint sd-footnote" id="sd-footnote"></p>
+</div>
+
+<script src="{{ url_for('static', filename='sales_dashboard.js') }}"></script>
+{% endblock %}
