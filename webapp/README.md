@@ -101,7 +101,8 @@ read-only from QuickBooks (`sales_dashboard.py`):
   apply journal-entry or credit-memo credits add nothing.
 - **RSM** is the invoice's "RSM" dropdown custom field. QuickBooks returns
   the option id, so `RSM_NAMES` in `sales_dashboard.py` maps ids to names;
-  ids not in that list show as "Unmapped RSM #n" until they're added.
+  ids not in that list show as "Unmapped RSM #n" until they're added. The full list, with the other invoice custom
+  fields, is in [`docs/qbo-custom-fields.md`](../docs/qbo-custom-fields.md).
 
 It covers everything since `START_DATE` (Jan 2025) -- a few thousand
 transactions -- so the page reads a cache (`sales_dashboard_cache.json`,
