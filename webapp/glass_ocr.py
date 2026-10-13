@@ -174,26 +174,39 @@ RAPID_UNIT_RE = re.compile(
     r"QTY:?(\d+?)-?[0O]VERALLDIM\.?:?([\d/]+)\"?[X×]([\d/]+)\"?-?[0O]A:?([\d/]+)\"", re.IGNORECASE)
 
 
-def cross_check_units(units, rapid_pages):
-    """Compare each unit's qty / size / OA with the second reader, in page
-    order. Adds flags to the unit dicts in place."""
+def cross_check_units(units, rapid_pages, sheet_flags=None):
+    """Compare each unit's qty / size / OA with the second reader, matched by
+    unit number. Adds flags to the unit dicts (and sheet_flags) in place."""
     if rapid_pages is None:
         for u in units:
             u["flags"].append("Only one OCR reader available -- couldn't double-check this scan")
         return
     stream = "".join(_compact(b["text"]) for page in rapid_pages for b in (page or []))
-    readings = [m.groups() for m in RAPID_UNIT_RE.finditer(stream)]
-    for i, u in enumerate(units):
-        if i >= len(readings):
+    readings = {}
+    for chunk in stream.split("UNIT#")[1:]:
+        m = re.match(r"(.+?)VEND[0O]R", chunk)
+        if not m:
+            continue
+        r = RAPID_UNIT_RE.search(chunk)
+        readings[m.group(1).rstrip(".,")] = r.groups() if r else None
+
+    labels = ("Qty", "Width", "Height", "OA")
+    for u in units:
+        key = _compact(u["unit"]).rstrip(".,")
+        if key not in readings:
             u["flags"].append("Second OCR reader couldn't find this unit -- check it against the paper")
             continue
-        qty, w, h, oa = readings[i]
+        reading = readings.pop(key)
+        if reading is None:
+            if u["w"]:
+                u["flags"].append("Second OCR reader couldn't read this unit's size -- check it against the paper")
+            continue
+        qty, w, h, oa = reading
         mine = (str(u["qty"]), _compact(u["w"]), _compact(u["h"]), _compact(u["oa"]).rstrip('"'))
         theirs = (qty.lstrip("0") or "0", w, h, oa)
-        labels = ("Qty", "Width", "Height", "OA")
         for label, a, b in zip(labels, mine, theirs):
             if a != b:
                 u["flags"].append(f"{label} unclear on the scan (read as {a!r} and {b!r}) -- check against the paper")
-    if len(readings) > len(units):
-        units and units[-1]["flags"].append(
-            f"Second OCR reader found {len(readings)} units but {len(units)} were read -- a unit may be missing")
+    if readings and sheet_flags is not None:
+        sheet_flags.append("The scan may have more units than were read (second reader also saw Unit# "
+                           + ", ".join(readings) + ") -- compare the unit count with the paper.")
