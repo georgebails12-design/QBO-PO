@@ -294,7 +294,7 @@ def line_item_from_parsed_unit(unit: dict) -> Tuple[Optional["LineItem"], List[s
     m = re.match(r"^\s*(.+?)\s*X\s*(.+?)\s*$", unit["dim"], re.IGNORECASE)
     if not m:
         return None, flags + [f'Could not split "{unit["dim"]}" into width x height.']
-    width_str, height_str = f'{m.group(1)}"', f'{m.group(2)}"'
+    width_str, height_str = f'{m.group(1).rstrip(chr(34))}"', f'{m.group(2).rstrip(chr(34))}"'
 
     try:
         item = LineItem(

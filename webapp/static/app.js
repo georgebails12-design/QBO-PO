@@ -437,8 +437,11 @@ function renderGlassReview(parsed) {
   if (parsed.project_name) bits.push(`Project: ${parsed.project_name}`);
   if (parsed.job) bits.push(`Job #: ${parsed.job}`);
   if (parsed.jdm) bits.push(`JDM: ${parsed.jdm}`);
-  document.getElementById('glass-summary').textContent =
-    (bits.join('   ') || 'Parsed glass breakdown') + ` -- ${parsed.units.length} unit(s) found.`;
+  if (parsed.reorder) bits.push(`GLASS REORDER${parsed.reorder_reason ? ` (${parsed.reorder_reason})` : ''}`);
+  if (parsed.logo) bits.push(`Logo: ${parsed.logo}`);
+  let summary = (bits.join('   ') || 'Parsed glass breakdown') + ` -- ${parsed.units.length} unit(s) found.`;
+  if (parsed.sheet_flags && parsed.sheet_flags.length) summary += ` Check: ${parsed.sheet_flags.join(' ')}`;
+  document.getElementById('glass-summary').textContent = summary;
 
   const catNames = Object.keys(state.categories).sort();
   const catSel = document.getElementById('glass-category');
@@ -522,6 +525,7 @@ function generateCardinalCsv() {
       units: selected.map((r) => r.unit),
       po_number: poNumber.trim(),
       job_number: glassParsed ? glassParsed.job : null,
+      logo: glassParsed ? glassParsed.logo : '',
     }),
   }).then((res) => {
     let msg = `Wrote a CSV with ${res.count} unit(s).`;
@@ -529,8 +533,9 @@ function generateCardinalCsv() {
       msg += ` Spacer type mismatch on: ${res.mismatched_spacer.join(', ')} -- verify before sending.`;
     }
     if (res.skipped && res.skipped.length) {
-      msg += ` ${res.skipped.length} unit(s) skipped.`;
+      msg += ` Skipped: ${res.skipped.map((u) => `Unit# ${u.unit} (${(u.reasons || []).slice(-1)[0] || 'no reason given'})`).join('; ')}.`;
     }
+    if (res.warnings && res.warnings.length) msg += ` Check before sending: ${res.warnings.join(' ')}`;
     statusEl.textContent = msg;
     window.location = res.download_url;
   }).catch((e) => { statusEl.textContent = `Error: ${e.message}`; });
