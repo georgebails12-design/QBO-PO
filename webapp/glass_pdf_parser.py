@@ -276,9 +276,11 @@ def parse_sheet(lines):
             return norm(m.group(1)) if m else default
 
         raw_unit = grab(r"UNIT#\s*(.+?)\s+VENDOR:")
-        unit = re.sub(r"\s+", "", raw_unit)
+        unit = re.sub(r"\s+", "", raw_unit).rstrip(".,")
         qty = int(grab(r"QTY:\s*(\d+)", "0"))
         oa = grab(r'OA:\s*([^-]+?")')
+        if oa:
+            oa = fix_fraction(oa.rstrip('"'), flags, "OA") + '"'
 
         w = h = ""
         d = re.search(r'OVERALL DIM\.?:\s*([\d\s/]+?)\s*("?)\s*[xX×]\s*([\d\s/]+?)\s*"', flat)
@@ -287,6 +289,9 @@ def parse_sheet(lines):
             h = fix_fraction(d.group(3), flags, "Height")
             if not d.group(2):
                 flags.append(f"Sheet is missing the inch mark after the width ({norm(d.group(1))})")
+        elif re.search(r"OVERALL DIM\.?:\s*SHAPED", flat, re.IGNORECASE):
+            flags.append("Shaped glass -- no overall size on the sheet; take it from the shop drawing details "
+                         "and fix the item name before creating it")
         else:
             flags.append("Could not read the overall size on the sheet")
 
@@ -351,8 +356,8 @@ def resolve_lite(text, mapping):
 
 PLY_RE = re.compile(r'^(?P<thk>\d+/\d+)"\s*(?P<lite>.+)$')
 SPACER_RE = re.compile(r'^(?P<size>\d+/\d+)"\s*(?P<color>[A-Z]+)\s+(?:ALUMINUM\s+)?SPACER\b(?P<rest>.*)$', re.IGNORECASE)
-SHADOW_RE = re.compile(r"SHADOW BARS\s*\(\s*(?:M[- ]?CODE)?[- ]?\s*([^)]+?)\s*\)", re.IGNORECASE)
-BUMP_RE = re.compile(r"BUMP ON\s*\(([^)]+)\)", re.IGNORECASE)
+SHADOW_RE = re.compile(r"SHADOW BARS\s*\(\s*(?:M[- ]?CODE)?[\s:-]*([^)]+?)\s*\)", re.IGNORECASE)
+BUMP_RE = re.compile(r"BUMP ON\s*(?:\(([^)]+)\)|(\w+))", re.IGNORECASE)
 
 
 def parse_spec(spec):
@@ -380,8 +385,8 @@ def parse_spec(spec):
     lite2_text = p2.group("lite")
 
     shadow = SHADOW_RE.search(sp.group("rest")) or SHADOW_RE.search(lite2_text)
-    bump = BUMP_RE.search(sp.group("rest"))
-    lite2_text = SHADOW_RE.sub("", lite2_text)
+    bump = BUMP_RE.search(sp.group("rest")) or BUMP_RE.search(lite2_text)
+    lite2_text = BUMP_RE.sub("", SHADOW_RE.sub("", lite2_text))
     lite2_text = re.sub(r"\bw/\s*$", "", lite2_text.strip(), flags=re.IGNORECASE)
     # A trailing "(99)"-style code after the lite isn't part of its name.
     m = re.search(r"\s*\(([^)]*)\)\s*$", lite2_text)
@@ -405,7 +410,7 @@ def parse_spec(spec):
     if re.search(r"ARGON", sp.group("rest"), re.IGNORECASE):
         flags.append("Argon fill on the sheet -- confirm it's on the Cardinal order")
     if shadow:
-        flags.append(f"SHADOW BARS ({shadow.group(1)})" + (f" w/ BUMP ON ({bump.group(1)})" if bump else ""))
+        flags.append(f"SHADOW BARS ({shadow.group(1)})" + (f" w/ BUMP ON ({bump.group(1) or bump.group(2)})" if bump else ""))
 
     return {
         "thk1": p1.group("thk"),
@@ -415,7 +420,7 @@ def parse_spec(spec):
         "spc_type": spc_type,
         "spc_size": sp.group("size"),
         "shadow_code": shadow.group(1) if shadow else "",
-        "bump_code": bump.group(1) if bump else "",
+        "bump_code": (bump.group(1) or bump.group(2)) if bump else "",
     }, flags
 
 
@@ -423,7 +428,8 @@ def parse_spec(spec):
 # Item name / description
 # ---------------------------------------------------------------------------
 def item_name(job, unit, w, h):
-    return f'{w}" x {h}" (Job# {job} Unit# {unit})'
+    size = f'{w}" x {h}"' if w and h else "SHAPED GLASS - SIZE?"
+    return f'{size} (Job# {job} Unit# {unit})'
 
 
 def description(makeup, order_line, oa, include_order_line=True):
@@ -466,9 +472,20 @@ def build_result(sheet):
     }
 
 
-def has_text_layer(path):
+def is_scanned(path):
+    """True for copier scans: every page is one full-page picture. Some
+    copiers add their own (often garbled) hidden text layer to the picture,
+    so text being present doesn't mean it's a system-generated PDF."""
+    saw_scan_page = False
     with pdfplumber.open(path) as pdf:
-        return any(page.chars for page in pdf.pages)
+        for page in pdf.pages:
+            area = page.width * page.height
+            covered = max(((im["x1"] - im["x0"]) * (im["bottom"] - im["top"]) for im in page.images), default=0)
+            if covered >= 0.9 * area:
+                saw_scan_page = True
+            elif page.chars:
+                return False  # real text on a page that isn't a picture
+    return saw_scan_page
 
 
 def parse_glass_pdf(path):
@@ -482,7 +499,7 @@ def parse_glass_pdf(path):
 
     Raises ValueError if no UNIT# blocks are found (wrong kind of PDF).
     """
-    scanned = not has_text_layer(path)
+    scanned = is_scanned(path)
     rapid_pages = None
     if scanned:
         import glass_ocr
@@ -513,7 +530,7 @@ def parse_glass_pdf(path):
                                   f"{header['project']}) -- check it against the paper")
         if not re.fullmatch(r"\d{4,}", sheet["project"] or ""):
             sheet["flags"].append("Couldn't read the project # from the scan -- fix the Job# in each item name")
-        glass_ocr.cross_check_units(sheet["units"], rapid_pages)
+        glass_ocr.cross_check_units(sheet["units"], rapid_pages, sheet["flags"])
         for u in sheet["units"]:
             u["flags"].insert(0, glass_ocr.SCAN_FLAG)
     result = build_result(sheet)
