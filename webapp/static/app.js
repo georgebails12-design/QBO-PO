@@ -32,8 +32,13 @@ function fmtMoney(n) { return (Math.round((n + Number.EPSILON) * 100) / 100).toF
 // ---------------------------------------------------------------------
 // Generic type-ahead
 // ---------------------------------------------------------------------
-function attachTypeahead({ input, box, source, filter, render, onPick }) {
+// remote: 'customers' | 'vendors' | 'items' -- when nothing in the cached
+// list matches, search QuickBooks live (catches records added since the
+// last refresh) and add what it finds to the list.
+function attachTypeahead({ input, box, source, filter, render, onPick, remote }) {
   let matches = [];
+  let remoteTimer = null;
+  const searched = new Set();
   function hide() { box.classList.remove('open'); box.innerHTML = ''; }
   function show() {
     box.innerHTML = '';
@@ -51,6 +56,20 @@ function attachTypeahead({ input, box, source, filter, render, onPick }) {
     if (!term) { hide(); return; }
     matches = source().filter((it) => filter(it, term)).slice(0, 8);
     show();
+    clearTimeout(remoteTimer);
+    if (remote && !matches.length && term.length >= 3 && !searched.has(term)) {
+      remoteTimer = setTimeout(() => {
+        searched.add(term);
+        api(`/api/lookup/${remote}?q=${encodeURIComponent(term)}`).then((rows) => {
+          const list = state[remote];
+          const have = new Set(list.map((r) => r.id));
+          rows.forEach((r) => { if (!have.has(r.id)) list.push(r); });
+          if (input.value.trim().toLowerCase() !== term) return;
+          matches = source().filter((it) => filter(it, term)).slice(0, 8);
+          show();
+        }).catch(() => {});
+      }, 350);
+    }
   });
   input.addEventListener('blur', () => setTimeout(hide, 150));
   input.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
@@ -91,6 +110,12 @@ function loadReference() {
     const ageMin = Math.round((Date.now() / 1000 - data.fetched_at) / 60);
     setStatus(`Loaded ${state.vendors.length} vendors, ${state.items.length} items, ${state.accounts.length} accounts, `
       + `${state.customers.length} customers/projects (${ageMin} min old).`);
+    // Lists older than 6 hours refresh themselves in the background; the
+    // page stays usable on the cached copy meanwhile.
+    if (ageMin > 6 * 60 && !state.autoRefreshed) {
+      state.autoRefreshed = true;
+      refreshReference();
+    }
   });
 }
 
@@ -140,7 +165,7 @@ function setupHeader() {
   attachTypeahead({
     input: document.getElementById('vendor-input'),
     box: document.getElementById('vendor-suggestions'),
-    source: () => state.vendors, filter: vendorFilter, render: (v) => v.name,
+    source: () => state.vendors, filter: vendorFilter, remote: 'vendors', render: (v) => v.name,
     onPick: (v) => { state.vendorId = v.id; document.getElementById('vendor-input').value = v.name; loadVendorEmail(v); },
   });
   document.getElementById('vendor-input').addEventListener('input', () => {
@@ -151,7 +176,7 @@ function setupHeader() {
   attachTypeahead({
     input: document.getElementById('header-customer-input'),
     box: document.getElementById('header-customer-suggestions'),
-    source: () => state.customers, filter: customerFilter, render: (c) => c.name,
+    source: () => state.customers, filter: customerFilter, remote: 'customers', render: (c) => c.name,
     onPick: (c) => {
       state.headerCustomer = { id: c.id, name: c.name };
       document.getElementById('header-customer-input').value = c.name;
@@ -229,7 +254,7 @@ function addItemRow() {
   }
 
   attachTypeahead({
-    input: itemInput, box: itemBox, source: () => state.items, filter: itemFilter, render: itemLabel,
+    input: itemInput, box: itemBox, source: () => state.items, filter: itemFilter, remote: 'items', render: itemLabel,
     onPick: (it) => {
       row.itemId = it.id;
       itemInput.value = it.name;
@@ -243,7 +268,7 @@ function addItemRow() {
   itemInput.addEventListener('input', () => { row.itemId = null; });
 
   attachTypeahead({
-    input: customerInput, box: customerBox, source: () => state.customers, filter: customerFilter, render: (c) => c.name,
+    input: customerInput, box: customerBox, source: () => state.customers, filter: customerFilter, remote: 'customers', render: (c) => c.name,
     onPick: (c) => { row.customerId = c.id; customerInput.value = c.name; },
   });
   customerInput.addEventListener('input', () => { row.customerId = null; });
@@ -307,7 +332,7 @@ function addCategoryRow() {
   accountInput.addEventListener('input', () => { row.accountId = null; });
 
   attachTypeahead({
-    input: customerInput, box: customerBox, source: () => state.customers, filter: customerFilter, render: (c) => c.name,
+    input: customerInput, box: customerBox, source: () => state.customers, filter: customerFilter, remote: 'customers', render: (c) => c.name,
     onPick: (c) => { row.customerId = c.id; customerInput.value = c.name; },
   });
   customerInput.addEventListener('input', () => { row.customerId = null; });
@@ -374,12 +399,13 @@ function setupNewItemDialog() {
 
     api('/api/items', { method: 'POST', body: JSON.stringify({ name, description, price, category }) })
       .then((item) => {
-        state.items.push(item);
+        if (!state.items.some((it) => it.id === item.id)) state.items.push(item);
+        if (item.existing) setStatus(`"${item.name}" was already in QuickBooks -- reused it instead of creating a duplicate.`);
         let target = state.itemRows[state.itemRows.length - 1];
         if (target.itemId || target.itemInput.value.trim()) target = addItemRow();
         target.itemId = item.id;
         target.itemInput.value = item.name;
-        target.descInput.value = item.description || '';
+        target.descInput.value = description || item.description || '';
         target.rateInput.value = price.toFixed(2);
         target.qtyInput.value = qty;
         target.amountCell.textContent = fmtMoney(price * qty);
@@ -491,24 +517,31 @@ function createGlassItems() {
         price: parseFloat(r.priceInput.value) || 0, category,
       }),
     }).then((item) => {
-      state.items.push(item);
-      created.push({ item, qty: parseFloat(r.qtyInput.value) || 1 });
+      if (!state.items.some((it) => it.id === item.id)) state.items.push(item);
+      created.push({
+        item, qty: parseFloat(r.qtyInput.value) || 1,
+        price: parseFloat(r.priceInput.value) || item.unit_price || 0,
+        description: r.descInput.value.trim() || item.description || '',
+      });
     }));
   });
   chain.then(() => {
-    created.forEach(({ item, qty }) => {
+    created.forEach(({ item, qty, price, description }) => {
       let target = state.itemRows[state.itemRows.length - 1];
       if (target.itemId || target.itemInput.value.trim()) target = addItemRow();
       target.itemId = item.id;
       target.itemInput.value = item.name;
-      target.descInput.value = item.description || '';
-      target.rateInput.value = (item.unit_price || 0).toFixed(2);
+      target.descInput.value = description;
+      target.rateInput.value = price.toFixed(2);
       target.qtyInput.value = qty;
-      target.amountCell.textContent = fmtMoney((item.unit_price || 0) * qty);
+      target.amountCell.textContent = fmtMoney(price * qty);
     });
     if (state.itemRows[state.itemRows.length - 1].itemId) addItemRow();
     updateTotal();
-    statusEl.textContent = `Created ${created.length} item(s) and added them to the PO.`;
+    const reused = created.filter(({ item }) => item.existing).length;
+    statusEl.textContent = reused
+      ? `Added ${created.length} item(s) to the PO -- ${created.length - reused} created, ${reused} already in QuickBooks and reused.`
+      : `Created ${created.length} item(s) and added them to the PO.`;
   }).catch((e) => { statusEl.textContent = `Error: ${e.message}`; });
 }
 
