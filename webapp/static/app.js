@@ -441,14 +441,19 @@ function setupGlassDialog() {
     if (!file) { errEl.textContent = 'Choose a PDF first.'; errEl.style.display = 'block'; return; }
     const fd = new FormData();
     fd.append('file', file);
+    const parseBtn = document.getElementById('glass-parse-btn');
+    parseBtn.disabled = true;
+    parseBtn.textContent = 'Reading... (scans take ~5 s a page)';
+    const done = () => { parseBtn.disabled = false; parseBtn.textContent = 'Parse PDF'; };
     fetch('/api/glass-pdf', { method: 'POST', body: fd }).then(async (res) => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not parse PDF.');
       return data;
     }).then((parsed) => {
+      done();
       glassParsed = parsed;
       renderGlassReview(parsed);
-    }).catch((e) => { errEl.textContent = e.message; errEl.style.display = 'block'; });
+    }).catch((e) => { done(); errEl.textContent = e.message; errEl.style.display = 'block'; });
   });
 
   document.getElementById('glass-create-items').addEventListener('click', createGlassItems);
@@ -465,6 +470,7 @@ function renderGlassReview(parsed) {
   if (parsed.jdm) bits.push(`JDM: ${parsed.jdm}`);
   if (parsed.reorder) bits.push(`GLASS REORDER${parsed.reorder_reason ? ` (${parsed.reorder_reason})` : ''}`);
   if (parsed.logo) bits.push(`Logo: ${parsed.logo}`);
+  if (parsed.scanned) bits.push('READ FROM A SCAN -- check every size and qty against the paper');
   let summary = (bits.join('   ') || 'Parsed glass breakdown') + ` -- ${parsed.units.length} unit(s) found.`;
   if (parsed.sheet_flags && parsed.sheet_flags.length) summary += ` Check: ${parsed.sheet_flags.join(' ')}`;
   document.getElementById('glass-summary').textContent = summary;

@@ -64,6 +64,17 @@ def load_secret_key():
 
 app = Flask(__name__)
 app.secret_key = load_secret_key()
+
+
+@app.url_defaults
+def static_cache_bust(endpoint, values):
+    """Add ?v=<file mtime> to static URLs, so browsers fetch the new
+    app.js/style.css right after a deploy instead of a stale cached copy."""
+    if endpoint == "static" and "filename" in values:
+        try:
+            values["v"] = int(os.stat(os.path.join(app.static_folder, values["filename"])).st_mtime)
+        except OSError:
+            pass
 app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 12  # 12 hours
 
 TOKEN_LOCK = threading.Lock()  # serialize QBO token refreshes across concurrent users
