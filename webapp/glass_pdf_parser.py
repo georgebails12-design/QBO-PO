@@ -48,6 +48,8 @@ import pdfplumber
 # Confirmed mappings only -- see module docstring for how to extend these.
 LITE1_MAP = {
     "CARDINAL 366 LOW-E TEMP": "T:Q366",
+    "SATIN ETCH TEMPERED": "T:SATIN ETCH",
+    "SATIN ETCH TEMP": "T:SATIN ETCH",
 }
 LITE2_MAP = {
     "CLEAR TEMP": "T:CLEAR",
@@ -314,7 +316,10 @@ def parse_sheet(lines):
 # Makeup -> Cardinal THK / LITE / SPC breakdown
 # ---------------------------------------------------------------------------
 def resolve_lite(text, mapping):
-    key = re.sub(r"\s+", " ", text.strip().upper())
+    # "(SURFACE 2 &3)" says which face is etched; it isn't part of the glass
+    # name Cardinal codes are keyed on.
+    key = re.sub(r"\(\s*SURFACES?\b[^)]*\)", " ", text.upper())
+    key = re.sub(r"\s+", " ", key).strip()
     if key in mapping:
         return mapping[key], None
     # Tolerate a trailing "#4"-style suffix (e.g. "SATIN ETCHED #4")
