@@ -16,6 +16,7 @@ login sessions survive a restart; a random one is generated otherwise
 
 import concurrent.futures
 import os
+import re
 import secrets
 import tempfile
 import threading
@@ -237,11 +238,24 @@ def api_categories_delete(name):
 # ---------------------------------------------------------------------------
 # Items
 # ---------------------------------------------------------------------------
+def clean_item_name(name):
+    """QuickBooks item names can't contain ':' (its category separator),
+    tabs or newlines, and max out at 100 characters. A leading category
+    path ("Glass:...") is dropped -- the item is put in its category
+    separately -- and any other ':' becomes '-'."""
+    name = re.sub(r"[\t\r\n]+", " ", name or "")
+    parts = [p.strip() for p in name.split(":")]
+    while len(parts) > 1 and not re.search(r"\d", parts[0]):
+        parts.pop(0)
+    name = re.sub(r"\s+", " ", "-".join(p for p in parts if p)).strip()
+    return name[:100].rstrip()
+
+
 @app.route("/api/items", methods=["POST"])
 @auth.login_required
 def api_items_create():
     data = request.get_json(force=True)
-    name = (data.get("name") or "").strip()
+    name = clean_item_name(data.get("name"))
     category = (data.get("category") or "").strip()
     categories = qbo_client.load_categories()
     if not name:
