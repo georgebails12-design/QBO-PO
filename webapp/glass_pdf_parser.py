@@ -56,6 +56,9 @@ LITE2_MAP = {
     "SATIN ETCHED": "T:SATIN ETCH",
 }
 
+MAX_GLASS_INCHES = 144  # Cardinal's longest tempered side (Bulletin IG23)
+FRACTION_DENOMINATORS = {2, 4, 8, 16, 32, 64}
+
 LINE_Y_TOLERANCE = 3     # points; words this close vertically share a line
 CELL_GAP = 6             # points; a wider gap between words starts a new cell
 
@@ -135,6 +138,20 @@ def fix_fraction(raw, flags=None, label=""):
     whole = m.group(1) or "0"
     n = int(m.group(2) or m.group(4) or 0)
     d = int(m.group(3) or m.group(5) or 1)
+    if m.group(4) and n >= d:
+        # "571/16" -- the space between the inches and the fraction was lost
+        # (scans). Accept it only if exactly one split makes sense.
+        digits = m.group(4)
+        splits = [(digits[:k], int(digits[k:])) for k in range(1, len(digits))
+                  if not digits[k:].startswith("0") and int(digits[k:]) < d and int(digits[:k]) <= MAX_GLASS_INCHES]
+        if len(splits) == 1 and d in FRACTION_DENOMINATORS:
+            whole, n = splits[0]
+            if flags is not None:
+                flags.append(f'{label} read as "{t}" -- taken as {whole} {n}/{d}"; check against the paper')
+        else:
+            if flags is not None:
+                flags.append(f'{label} "{t}" can\'t be a real size -- check against the paper and fix the item name')
+            return t
     if not n:
         return whole
     k = math.gcd(n, d)
@@ -171,6 +188,8 @@ def clean_makeup(breakdown):
     s = re.sub(r"\(see drawing\)", "", s, flags=re.IGNORECASE)
     s = re.sub(r'"(?=[A-Za-z])', '" ', s)
     s = re.sub(r"\s*\+\s*", " + ", s)
+    # Stray punctuation from marks next to the last word (mostly on scans).
+    s = re.sub(r"[\s.,;:'`~»«“”]+$", "", s)
     return norm(s)
 
 
@@ -446,6 +465,11 @@ def build_result(sheet):
     }
 
 
+def has_text_layer(path):
+    with pdfplumber.open(path) as pdf:
+        return any(page.chars for page in pdf.pages)
+
+
 def parse_glass_pdf(path):
     """Parse a green-copy glass sheet / glass reorder form PDF.
 
@@ -457,13 +481,40 @@ def parse_glass_pdf(path):
 
     Raises ValueError if no UNIT# blocks are found (wrong kind of PDF).
     """
-    lines = extract_lines(path)
+    scanned = not has_text_layer(path)
+    rapid_pages = None
+    if scanned:
+        import glass_ocr
+        try:
+            lines, rapid_pages = glass_ocr.read_scanned_pdf(path)
+        except glass_ocr.OCRUnavailable as exc:
+            raise ValueError(f"This PDF is a scan, and scan reading isn't set up on the server: {exc}")
+    else:
+        lines = extract_lines(path)
     all_text = "\n".join(ln.text for ln in lines)
     if not (re.search(r"OVERALL DIM\.?:", all_text, re.IGNORECASE) and "UNIT#" in all_text):
         raise ValueError(
-            "This doesn't look like a glass sheet -- no UNIT# / OVERALL DIM. found. "
-            "If it's a scan, use the system-generated PDF instead.")
+            "This doesn't look like a glass sheet -- no UNIT# / OVERALL DIM. found."
+            + (" The scan may be too faint or crooked to read; try rescanning it straight, or use the "
+               "system-generated PDF." if scanned else ""))
     sheet = parse_sheet(lines)
     if not sheet["units"]:
         raise ValueError("No UNIT# blocks could be read from this PDF. Send it over so the parser can be updated.")
-    return build_result(sheet)
+    if scanned:
+        import glass_ocr
+        header = glass_ocr.header_from_rapid(rapid_pages)
+        if header["project"] and not re.fullmatch(r"\d{4,}", sheet["project"] or ""):
+            sheet["project"] = header["project"]
+            sheet["job_name"] = header["job_name"] or sheet["job_name"]
+            sheet["jdm"] = header["jdm"] or sheet["jdm"]
+        elif header["project"] and header["project"] != sheet["project"]:
+            sheet["flags"].append(f"Project # unclear on the scan (read as {sheet['project']} and "
+                                  f"{header['project']}) -- check it against the paper")
+        if not re.fullmatch(r"\d{4,}", sheet["project"] or ""):
+            sheet["flags"].append("Couldn't read the project # from the scan -- fix the Job# in each item name")
+        glass_ocr.cross_check_units(sheet["units"], rapid_pages)
+        for u in sheet["units"]:
+            u["flags"].insert(0, glass_ocr.SCAN_FLAG)
+    result = build_result(sheet)
+    result["scanned"] = scanned
+    return result
