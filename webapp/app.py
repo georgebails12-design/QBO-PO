@@ -367,13 +367,20 @@ def api_cardinal_csv():
         return jsonify({"error": "None of the units could be turned into a Cardinal line item.", "skipped": skipped}), 400
 
     spacer_type = next((s for s in spacer_types_seen if s), "BLACK SS")
+
+    # Logo from the sheet's special notes ("Use Windsor Logo"); Cardinal only
+    # knows PANDA and WINDSOR, so anything else keeps PANDA and is called out.
+    sheet_logo = (data.get("logo") or "").strip().upper()
+    logo = sheet_logo if sheet_logo in ("PANDA", "WINDSOR") else "PANDA"
+    logo_warning = (f"Sheet asks for the {data.get('logo')} logo, which has no known Cardinal logo code -- "
+                    "the CSV says PANDA; fix LOGO FILE before sending.") if sheet_logo and sheet_logo != logo else None
     mismatched = [li.unit_number for li, s in zip(line_items, spacer_types_seen) if s and s != spacer_type]
 
     import warnings
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         batch = cardinal_glass_output.Batch(
-            po_number=po_number, job_number=job_number, items=line_items, spacer_type=spacer_type,
+            po_number=po_number, job_number=job_number, items=line_items, spacer_type=spacer_type, logo=logo,
         )
         path = cardinal_glass_output.generate_batch_csv(batch, output_dir=DOWNLOAD_DIR)
 
@@ -382,7 +389,7 @@ def api_cardinal_csv():
         "count": len(line_items),
         "skipped": skipped,
         "mismatched_spacer": mismatched,
-        "warnings": [str(w.message) for w in caught],
+        "warnings": [str(w.message) for w in caught] + ([logo_warning] if logo_warning else []),
     })
 
 
