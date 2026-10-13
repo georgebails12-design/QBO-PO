@@ -20,6 +20,7 @@ WASP API calls in wasp_pick_editor.py.
 
 import json
 import os
+import re
 import time
 import urllib.parse
 
@@ -272,6 +273,41 @@ def get_customers():
     return [{"id": c["Id"], "name": c.get("FullyQualifiedName") or c.get("DisplayName")} for c in rows]
 
 
+def _like(term):
+    """A QBO query LIKE pattern for term, with quotes/backslashes escaped."""
+    escaped = term.strip().replace("\\", "\\\\").replace("'", "\\'")
+    return f"'%{escaped}%'"
+
+
+def search_customers(term):
+    """Live search, for customers/projects added since the cached list was fetched."""
+    rows = _query(
+        f"SELECT Id, DisplayName, FullyQualifiedName, Active FROM Customer "
+        f"WHERE Active = true AND DisplayName LIKE {_like(term)}"
+    )
+    return [{"id": c["Id"], "name": c.get("FullyQualifiedName") or c.get("DisplayName")} for c in rows]
+
+
+def search_vendors(term):
+    rows = _query(f"SELECT * FROM Vendor WHERE Active = true AND DisplayName LIKE {_like(term)}")
+    return [{
+        "id": v["Id"],
+        "name": v.get("DisplayName") or v.get("CompanyName"),
+        "email": (v.get("PrimaryEmailAddr") or {}).get("Address", ""),
+    } for v in rows]
+
+
+def search_items(term):
+    rows = _query(
+        "SELECT Id, Name, Description, UnitPrice, PurchaseCost, Type, Active "
+        f"FROM Item WHERE Active = true AND Name LIKE {_like(term)}"
+    )
+    return [{
+        "id": it["Id"], "name": it.get("Name"), "description": it.get("Description", ""),
+        "unit_price": it.get("UnitPrice"), "purchase_cost": it.get("PurchaseCost"), "type": it.get("Type"),
+    } for it in rows]
+
+
 def get_accounts(account_type=None):
     """account_type: e.g. 'Expense', 'Cost of Goods Sold', 'Income' -- or None for all."""
     sql = "SELECT Id, Name, AccountType, AccountSubType, Active FROM Account WHERE Active = true"
@@ -307,7 +343,21 @@ def create_item(name, description, price, income_account_id, expense_account_id,
     if category_id:
         payload["SubItem"] = True
         payload["ParentRef"] = {"value": str(category_id)}
-    data = _post("item", payload)
+    try:
+        data = _post("item", payload)
+    except QBOError as exc:
+        # An item with this exact name already exists (e.g. this glass sheet
+        # was imported before) -- reuse it rather than failing.
+        m = re.search(r'"code"\s*:\s*"6240".*?Id=(\d+)', str(exc)) or re.search(r'Id=(\d+).*?"code"\s*:\s*"6240"', str(exc))
+        if not m:
+            raise
+        existing = _get(f"item/{m.group(1)}").get("Item", {})
+        if not existing.get("Active", True):
+            raise QBOError(f'An inactive QuickBooks item is already named "{name}" (Id {m.group(1)}). '
+                           "Make it active in QuickBooks, or change the name, then try again.")
+        return {"id": existing.get("Id"), "name": existing.get("Name"), "existing": True,
+                "description": existing.get("Description", ""), "unit_price": existing.get("UnitPrice"),
+                "purchase_cost": existing.get("PurchaseCost")}
     item = data.get("Item", {})
     return {"id": item.get("Id"), "name": item.get("Name")}
 

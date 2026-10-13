@@ -259,14 +259,52 @@ def api_items_create():
     except qbo_client.QBOError as exc:
         return err(exc, 502)
 
-    item = {
-        "id": created["id"], "name": created["name"], "description": (data.get("description") or "").strip(),
-        "unit_price": price, "purchase_cost": price, "type": "NonInventory",
-    }
-    cache = qbo_client.load_reference_cache() or {"vendors": [], "items": [], "accounts": [], "customers": [], "fetched_at": time.time()}
-    cache["items"].append(item)
-    qbo_client.save_reference_cache(cache["vendors"], cache["items"], cache["accounts"], cache["customers"])
+    if created.get("existing"):
+        # Already in QuickBooks under this name -- reuse it, keeping its price.
+        item = {
+            "id": created["id"], "name": created["name"], "description": created.get("description") or "",
+            "unit_price": created.get("unit_price") or 0, "purchase_cost": created.get("purchase_cost"),
+            "type": "NonInventory", "existing": True,
+        }
+    else:
+        item = {
+            "id": created["id"], "name": created["name"], "description": (data.get("description") or "").strip(),
+            "unit_price": price, "purchase_cost": price, "type": "NonInventory",
+        }
+    merge_into_cache("items", [item])
     return jsonify(item)
+
+
+def merge_into_cache(kind, rows):
+    """Add rows (deduped by id) to the cached reference list of this kind."""
+    cache = qbo_client.load_reference_cache() or {"vendors": [], "items": [], "accounts": [], "customers": [], "fetched_at": time.time()}
+    have = {r["id"] for r in cache[kind]}
+    new_rows = [{k: v for k, v in r.items() if k != "existing"} for r in rows if r["id"] not in have]
+    if new_rows:
+        cache[kind].extend(new_rows)
+        qbo_client.save_reference_cache(cache["vendors"], cache["items"], cache["accounts"], cache["customers"])
+
+
+LOOKUPS = {"customers": qbo_client.search_customers, "vendors": qbo_client.search_vendors, "items": qbo_client.search_items}
+
+
+@app.route("/api/lookup/<kind>")
+@auth.login_required
+def api_lookup(kind):
+    """Live QuickBooks search, for records added since the cached lists were fetched."""
+    if kind not in LOOKUPS:
+        return err("Unknown lookup.", 404)
+    term = (request.args.get("q") or "").strip()
+    if len(term) < 2:
+        return jsonify([])
+    with TOKEN_LOCK:
+        qbo_client.get_valid_access_token()
+    try:
+        rows = LOOKUPS[kind](term)[:25]
+    except qbo_client.QBOError as exc:
+        return err(exc, 502)
+    merge_into_cache(kind, rows)
+    return jsonify(rows)
 
 
 # ---------------------------------------------------------------------------
