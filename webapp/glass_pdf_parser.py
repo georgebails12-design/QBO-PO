@@ -54,6 +54,7 @@ LITE1_MAP = {
 LITE2_MAP = {
     "CLEAR TEMP": "T:CLEAR",
     "SATIN ETCHED": "T:SATIN ETCH",
+    "I89 TEMP": "T:I89",
 }
 
 MAX_GLASS_INCHES = 144  # Cardinal's longest tempered side (Bulletin IG23)
