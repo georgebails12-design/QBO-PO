@@ -85,3 +85,23 @@ export. The one difference: reference data (vendors/items/accounts/
 customers) is refreshed on-demand via a background job polled from the
 page, since QuickBooks paginates at 1000 records/request and this
 company's lists are large (thousands of each).
+
+## Commission bills
+
+`commission_bills.py` turns the payroll commission workbook
+(`Payroll_Com_<date>.xlsx`) into one QuickBooks Bill per row, using the same
+QuickBooks connection as the PO app. Run it from the app folder on the server:
+
+```bash
+venv/bin/pip install -r requirements.txt                       # once, for openpyxl
+venv/bin/python commission_bills.py Payroll_Com_Oct_26th_2026.xlsx           # preview
+venv/bin/python commission_bills.py Payroll_Com_Oct_26th_2026.xlsx --post    # create bills
+```
+
+Each bill: vendor = sales rep (column B), bill date = payment date (I),
+due date = payroll date from the sheet name ("Oct 26") or `--due-date`,
+bill no. = "17506 Final", category `6800 Sales Commissions`, class
+`Operations`, customer = column F, amount = commission (O). Reps are mapped
+to vendors in `commission_vendors.json`. Bills that already exist (same
+number and vendor) are skipped, so re-running is safe. `--export file.csv`
+also writes the bills in the QuickBooks import-sheet layout.

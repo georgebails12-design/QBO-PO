@@ -1,0 +1,4 @@
+{
+  "_comment": "Sales rep name as written in column B of the commission sheet -> QuickBooks vendor display name. Reps not listed here are matched automatically when exactly one vendor's name contains the rep's name. To split one row between vendors use a list: \"TE\": [{\"vendor\": \"...\", \"share\": 0.5}, {\"vendor\": \"...\", \"share\": 0.5}]",
+  "Derrick": "MCCALL DERRICK"
+}
