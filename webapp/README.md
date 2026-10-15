@@ -100,7 +100,8 @@ venv/bin/python commission_bills.py Payroll_Com_Oct_26th_2026.xlsx --post    # c
 
 Each bill: vendor = sales rep (column B), bill date = payment date (I),
 due date = payroll date from the sheet name ("Oct 26") or `--due-date`,
-bill no. = "17506 Final", category `6800 Sales Commissions`, class
+bill no. = "17506 Final", memo = the line description, Q Number/PO # = column M
+(the custom field is found from existing bills, or pass `--q-field-id`), category `6800 Sales Commissions`, class
 `Operations`, customer = column F, amount = commission (O). Reps are mapped
 to vendors in `commission_vendors.json` (a shared deal like "TE" lists
 each vendor; the "2nd Comm" column is billed to the vendor under the

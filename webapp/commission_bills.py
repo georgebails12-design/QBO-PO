@@ -33,6 +33,7 @@ import sys
 from decimal import Decimal, ROUND_HALF_UP
 
 import openpyxl
+import requests
 
 import qbo_client
 
@@ -49,6 +50,7 @@ COL = {
     "inv_no": 4,       # E
     "customer": 5,     # F  Customer:Project
     "stage": 6,        # G  Final / Deposit
+    "q_number": 12,    # M  Q Number
     "pay_date": 8,     # I
     "panda_amt": 9,    # J  "Panda #"
     "rate": 13,        # N  %
@@ -56,7 +58,7 @@ COL = {
     "second": 15,      # P  2nd Comm
     "comm_memo": 17,   # R
 }
-EXPECTED_HEADERS = {"inv_no": "Number", "customer": "Custmer/Project", "rate": "%",
+EXPECTED_HEADERS = {"q_number": "Q Number", "inv_no": "Number", "customer": "Custmer/Project", "rate": "%",
                     "commission": "Comission", "second": "2nd Comm"}
 
 MONTHS = {m: i for i, m in enumerate(
@@ -141,6 +143,7 @@ def read_rows(path, sheet=None):
             "second": money(second) if isinstance(second, (int, float)) and second else None,
             "second_description": f"{doc_number} {customer} P#$ {panda_txt} {second_rate}".strip(),
             "description": f"{doc_number} {customer} P#$ {panda_txt} {rate_txt}".strip(),
+            "q_number": str(r[COL["q_number"]] or "").strip(),
         })
     return ws.title, rows
 
@@ -232,6 +235,43 @@ class Lookups:
         raise LookupError(f"no vendor for '{rep}' -- add it to commission_vendors.json")
 
 
+# The bill's "Q Number/PO #" box is a QuickBooks custom field. Custom fields
+# are only returned/accepted with a newer minor version and this include flag.
+CF_MINOR_VERSION = "75"
+CF_PARAMS = {"minorversion": CF_MINOR_VERSION, "include": "enhancedAllCustomFields"}
+Q_FIELD_NAMES = ("q number/po #", "q number/po#", "q number", "q#/po #", "q#")
+
+
+def _cf_request(method, path, params=None, payload=None):
+    access_token, realm_id, environment = qbo_client.get_valid_access_token()
+    url = f"{qbo_client._api_base(environment, realm_id)}/{path}"
+    resp = requests.request(method, url, headers=qbo_client._headers(access_token),
+                            params={**CF_PARAMS, **(params or {})},
+                            data=json.dumps(payload) if payload is not None else None, timeout=30)
+    if resp.status_code not in (200, 201):
+        raise qbo_client.QBOError(f"QuickBooks {method} {path} failed ({resp.status_code}): {resp.text}")
+    return resp.json()
+
+
+def find_q_field():
+    """The "Q Number/PO #" custom field as seen on recent bills: {"DefinitionId", "Name", "Type"} or None."""
+    data = _cf_request("GET", "query", {"query": "SELECT * FROM Bill ORDERBY MetaData.LastUpdatedTime DESC "
+                                                 "STARTPOSITION 1 MAXRESULTS 200"})
+    seen = {}
+    for bill in data.get("QueryResponse", {}).get("Bill", []):
+        for cf in bill.get("CustomField") or []:
+            if cf.get("DefinitionId"):
+                seen.setdefault(norm(cf.get("Name")), cf)
+    for name in Q_FIELD_NAMES:
+        if name in seen:
+            cf = seen[name]
+            return {"DefinitionId": cf["DefinitionId"], "Name": cf.get("Name"), "Type": cf.get("Type", "StringType")}
+    for name, cf in seen.items():  # e.g. "Q #/PO Number"
+        if re.match(r"q\b|q#", name) and ("number" in name or "po" in name):
+            return {"DefinitionId": cf["DefinitionId"], "Name": cf.get("Name"), "Type": cf.get("Type", "StringType")}
+    return None
+
+
 def existing_bills(doc_numbers):
     """{(doc_number, vendor_id)} for bills already in QBO with these numbers."""
     found = set()
@@ -247,7 +287,7 @@ def existing_bills(doc_numbers):
 # ---------------------------------------------------------------------------
 # Build / post
 # ---------------------------------------------------------------------------
-def plan_bills(rows, lk, due_date, account, klass):
+def plan_bills(rows, lk, due_date, account, klass, q_field=None):
     bills, problems = [], []
     second_name = lk.vendor_map.get(norm(SECOND_COMM_KEY))
     second_vendor = lk.vendor_by_display(second_name) if second_name else None
@@ -277,7 +317,7 @@ def plan_bills(rows, lk, due_date, account, klass):
             else:
                 lines.append((second_vendor, r["second"], "map", r["second_description"]))
         for vendor, amount, how, description in lines:
-            bills.append({
+            bill = {
                 "row": r, "vendor": vendor, "how": how, "amount": amount, "customer": customer,
                 "description": description,
                 "payload": {
@@ -285,6 +325,7 @@ def plan_bills(rows, lk, due_date, account, klass):
                     "TxnDate": r["pay_date"].isoformat(),
                     "DueDate": due_date.isoformat(),
                     "DocNumber": r["doc_number"],
+                    "PrivateNote": description,  # the bill's Memo box, same text as the line description
                     "Line": [{
                         "DetailType": "AccountBasedExpenseLineDetail",
                         "Amount": float(amount),
@@ -296,7 +337,11 @@ def plan_bills(rows, lk, due_date, account, klass):
                         },
                     }],
                 },
-            })
+            }
+            if q_field and r["q_number"]:
+                bill["payload"]["CustomField"] = [{"DefinitionId": q_field["DefinitionId"], "Name": q_field["Name"],
+                                                   "Type": q_field["Type"], "StringValue": r["q_number"]}]
+            bills.append(bill)
     return bills, problems
 
 
@@ -323,6 +368,8 @@ def main():
     ap.add_argument("--sheet", help="sheet name (default: first sheet)")
     ap.add_argument("--account", default=DEFAULT_ACCOUNT, help=f"expense account (default: {DEFAULT_ACCOUNT})")
     ap.add_argument("--class", dest="klass", default=DEFAULT_CLASS, help=f"class (default: {DEFAULT_CLASS})")
+    ap.add_argument("--q-field-id", help="DefinitionId of the bill's 'Q Number/PO #' custom field "
+                                         "(default: found from existing bills)")
     ap.add_argument("--export", help="also write the bills to this CSV (QuickBooks import-sheet layout)")
     args = ap.parse_args()
 
@@ -334,7 +381,14 @@ def main():
 
     lk = Lookups()
     account, klass = lk.account(args.account), lk.klass(args.klass)
-    bills, problems = plan_bills(rows, lk, due_date, account, klass)
+    q_field = ({"DefinitionId": args.q_field_id, "Name": "Q Number/PO #", "Type": "StringType"}
+               if args.q_field_id else find_q_field())
+    if q_field:
+        print(f"Q Number goes in the bill's '{q_field['Name']}' box")
+    else:
+        print("WARNING: couldn't find the 'Q Number/PO #' box on any recent bill in QuickBooks -- "
+              "bills will be created without it (fill one in by hand on any bill, then re-run).")
+    bills, problems = plan_bills(rows, lk, due_date, account, klass, q_field)
     already = existing_bills(b["row"]["doc_number"] for b in bills)
 
     print()
@@ -367,8 +421,13 @@ def main():
     for b in to_post:
         r = b["row"]
         try:
-            data = qbo_client._post("bill", b["payload"])
-            print(f"Created bill {r['doc_number']} for {b['vendor']['DisplayName']} (Id {data['Bill']['Id']})")
+            data = _cf_request("POST", "bill", payload=b["payload"])
+            saved = data["Bill"]
+            note = ""
+            if b["payload"].get("CustomField") and not any(
+                    cf.get("StringValue") == r["q_number"] for cf in saved.get("CustomField") or []):
+                note = "  (WARNING: QuickBooks didn't keep the Q Number)"
+            print(f"Created bill {r['doc_number']} for {b['vendor']['DisplayName']} (Id {saved['Id']}){note}")
             created += 1
         except qbo_client.QBOError as e:
             print(f"FAILED row {r['excel_row']} {r['doc_number']}: {e}")

@@ -7,8 +7,18 @@
   "Tyler": "CLARK TYLER",
   "Stefan": "MONETTA STEFAN",
   "Alex": "TERAN EMANUEL",
-  "TE": ["BENTHAGEN TREVOR", "ZARATE EFRAIN"],
-  "ETA": ["ZARATE EFRAIN", "BENTHAGEN TREVOR"],
-  "TEA": ["BENTHAGEN TREVOR", "ZARATE EFRAIN"],
+  "David": "RODRIGUEZ DAVID",
+  "TE": [
+    "BENTHAGEN TREVOR",
+    "ZARATE EFRAIN"
+  ],
+  "ETA": [
+    "ZARATE EFRAIN",
+    "BENTHAGEN TREVOR"
+  ],
+  "TEA": [
+    "BENTHAGEN TREVOR",
+    "ZARATE EFRAIN"
+  ],
   "2nd Comm": "PUTNAM ANN MARIE"
 }
