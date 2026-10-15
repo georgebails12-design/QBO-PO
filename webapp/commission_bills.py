@@ -127,6 +127,10 @@ def read_rows(path, sheet=None):
         rate = r[COL["rate"]]
         panda_txt = f"{float(panda_amt):g}" if isinstance(panda_amt, (int, float)) else str(panda_amt or "")
         rate_txt = fmt_rate(rate) if isinstance(rate, (int, float)) else str(rate or "")
+        second = r[COL["second"]]
+        second_rate = ""
+        if isinstance(second, (int, float)) and second and isinstance(panda_amt, (int, float)) and panda_amt:
+            second_rate = fmt_rate(round(second / panda_amt, 5))
         rows.append({
             "excel_row": excel_row,
             "rep": rep,
@@ -134,7 +138,8 @@ def read_rows(path, sheet=None):
             "doc_number": doc_number,
             "pay_date": as_date(r[COL["pay_date"]]),
             "amount": money(commission),
-            "second": money(r[COL["second"]]) if isinstance(r[COL["second"]], (int, float)) else None,
+            "second": money(second) if isinstance(second, (int, float)) and second else None,
+            "second_description": f"{doc_number} {customer} P#$ {panda_txt} {second_rate}".strip(),
             "description": f"{doc_number} {customer} P#$ {panda_txt} {rate_txt}".strip(),
         })
     return ws.title, rows
@@ -153,6 +158,9 @@ def load_vendor_map():
     with open(VENDOR_MAP_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
     return {norm(k): v for k, v in data.items() if not k.startswith("_")}
+
+
+SECOND_COMM_KEY = "2nd Comm"  # commission_vendors.json key for who is paid the "2nd Comm" column
 
 
 class Lookups:
@@ -198,18 +206,20 @@ class Lookups:
         return self.vendor_by_name.get(norm(name))
 
     def payees(self, rep):
-        """[(vendor, share, how)] for a rep, or raise LookupError with the reason."""
+        """[(vendor, share, how)] for a rep, or raise LookupError with the reason.
+
+        share is the fraction of the row's commission that vendor is paid; on a
+        shared deal (e.g. "TE") each rep is normally paid the full commission."""
         mapped = self.vendor_map.get(norm(rep))
         if mapped:
-            splits = [{"vendor": mapped, "share": 1}] if isinstance(mapped, str) else mapped
+            splits = [mapped] if isinstance(mapped, str) else mapped
+            splits = [{"vendor": s} if isinstance(s, str) else s for s in splits]
             out = []
             for s in splits:
                 v = self.vendor_by_display(s["vendor"])
                 if not v:
                     raise LookupError(f"vendor '{s['vendor']}' (mapped for {rep}) not found in QuickBooks")
                 out.append((v, Decimal(str(s.get("share", 1))), "map"))
-            if sum(s for _, s, _ in out) != 1:
-                raise LookupError(f"shares for {rep} in commission_vendors.json don't add up to 1")
             return out
         # Not mapped: accept a single vendor whose name contains the rep's name as a word
         word = re.compile(rf"\b{re.escape(rep)}\b", re.I)
@@ -237,14 +247,12 @@ def existing_bills(doc_numbers):
 # ---------------------------------------------------------------------------
 # Build / post
 # ---------------------------------------------------------------------------
-def split_amount(total, shares):
-    parts = [money(total * s) for s in shares]
-    parts[-1] += total - sum(parts)  # rounding remainder on the last payee
-    return parts
-
-
 def plan_bills(rows, lk, due_date, account, klass):
     bills, problems = [], []
+    second_name = lk.vendor_map.get(norm(SECOND_COMM_KEY))
+    second_vendor = lk.vendor_by_display(second_name) if second_name else None
+    if second_name and not second_vendor:
+        raise SystemExit(f"'{SECOND_COMM_KEY}' vendor '{second_name}' not found in QuickBooks")
     for r in rows:
         try:
             payees = lk.payees(r["rep"])
@@ -261,9 +269,17 @@ def plan_bills(rows, lk, due_date, account, klass):
         if len(r["doc_number"]) > 21:
             problems.append((r, f"bill number '{r['doc_number']}' is longer than QuickBooks' 21 characters"))
             continue
-        for (vendor, _share, how), amount in zip(payees, split_amount(r["amount"], [s for _, s, _ in payees])):
+        lines = [(vendor, money(r["amount"] * share), how, r["description"]) for vendor, share, how in payees]
+        if r["second"]:
+            if not second_vendor:
+                problems.append((r, f"has 2nd Comm {r['second']:,.2f} but no '{SECOND_COMM_KEY}' vendor is set "
+                                    "in commission_vendors.json"))
+            else:
+                lines.append((second_vendor, r["second"], "map", r["second_description"]))
+        for vendor, amount, how, description in lines:
             bills.append({
                 "row": r, "vendor": vendor, "how": how, "amount": amount, "customer": customer,
+                "description": description,
                 "payload": {
                     "VendorRef": {"value": vendor["Id"]},
                     "TxnDate": r["pay_date"].isoformat(),
@@ -272,7 +288,7 @@ def plan_bills(rows, lk, due_date, account, klass):
                     "Line": [{
                         "DetailType": "AccountBasedExpenseLineDetail",
                         "Amount": float(amount),
-                        "Description": r["description"],
+                        "Description": description,
                         "AccountBasedExpenseLineDetail": {
                             "AccountRef": {"value": account["Id"]},
                             "CustomerRef": {"value": customer["Id"]},
@@ -295,7 +311,7 @@ def write_export(path, bills, due_date, account_label, class_label):
             r = b["row"]
             w.writerow(["Yes", f"{r['pay_date']:%m/%d/%Y}", f"{due_date:%m/%d/%Y}", r["doc_number"], "Bill",
                         b["customer"].get("FullyQualifiedName") or r["customer"], b["vendor"]["DisplayName"],
-                        "", "", r["description"], "1.00", "", f"{b['amount']:.2f}", account_label, "",
+                        "", "", b["description"], "1.00", "", f"{b['amount']:.2f}", account_label, "",
                         class_label, ""])
 
 
@@ -332,11 +348,6 @@ def main():
               f"{b['vendor']['DisplayName'][:26]:<26} {b['amount']:>10,.2f}  {r['customer']}{flag}")
     total = sum((b["amount"] for b in bills), Decimal(0))
     print(f"{'':>4}  {'':<15} {'':<10} {'TOTAL':<26} {total:>10,.2f}")
-
-    second = [r for r in rows if r["second"]]
-    if second:
-        print(f"\nNote: {len(second)} rows have a '2nd Comm' amount (total "
-              f"{sum(r['second'] for r in second):,.2f}); those are NOT billed by this script.")
 
     if problems:
         print(f"\n{len(problems)} row(s) can't be billed until fixed:")

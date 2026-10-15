@@ -102,6 +102,8 @@ Each bill: vendor = sales rep (column B), bill date = payment date (I),
 due date = payroll date from the sheet name ("Oct 26") or `--due-date`,
 bill no. = "17506 Final", category `6800 Sales Commissions`, class
 `Operations`, customer = column F, amount = commission (O). Reps are mapped
-to vendors in `commission_vendors.json`. Bills that already exist (same
+to vendors in `commission_vendors.json` (a shared deal like "TE" lists
+each vendor; the "2nd Comm" column is billed to the vendor under the
+`"2nd Comm"` key). Bills that already exist (same
 number and vendor) are skipped, so re-running is safe. `--export file.csv`
 also writes the bills in the QuickBooks import-sheet layout.
