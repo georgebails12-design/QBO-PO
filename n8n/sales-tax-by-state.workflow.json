@@ -1,0 +1,219 @@
+{
+  "name": "Monthly Sales Tax by State (QuickBooks)",
+  "nodes": [
+    {
+      "id": "a1",
+      "name": "Monthly on the 3rd",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months",
+              "monthsInterval": 1,
+              "triggerAtDayOfMonth": 3,
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a2",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "a3",
+      "name": "Set Report Month",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Reports on the previous calendar month. To re-run an older month, set OVERRIDE_MONTH, e.g. '2026-07'.\nconst OVERRIDE_MONTH = '';\n// QuickBooks company (realm) ID for Panda Windows & Doors Operations.\nconst REALM_ID = '9341454547526446';\n\nlet y, m;\nif (OVERRIDE_MONTH) {\n  [y, m] = OVERRIDE_MONTH.split('-').map(Number);\n} else {\n  const now = new Date();\n  y = now.getFullYear();\n  m = now.getMonth(); // previous month, 1-based\n  if (m === 0) { y -= 1; m = 12; }\n}\nconst pad = (n) => String(n).padStart(2, '0');\nconst lastDay = new Date(y, m, 0).getDate();\nreturn [{ json: {\n  realmId: REALM_ID,\n  startDate: `${y}-${pad(m)}-01`,\n  endDate: `${y}-${pad(m)}-${pad(lastDay)}`,\n  label: new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }),\n} }];\n"
+      }
+    },
+    {
+      "id": "a4",
+      "name": "Get Invoices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        100
+      ],
+      "parameters": {
+        "url": "=https://quickbooks.api.intuit.com/v3/company/{{ $json.realmId }}/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "quickBooksOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "minorversion",
+              "value": "75"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "query",
+                    "value": "=SELECT * FROM Invoice WHERE TxnDate >= '{{ $('Set Report Month').first().json.startDate }}' AND TxnDate <= '{{ $('Set Report Month').first().json.endDate }}' ORDERBY TxnDate STARTPOSITION {{ $pageCount * 1000 + 1 }} MAXRESULTS 1000"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ ($response.body.QueryResponse.Invoice || []).length < 1000 }}",
+              "limitPagesFetched": true,
+              "maxRequests": 20
+            }
+          }
+        }
+      },
+      "credentials": {
+        "quickBooksOAuth2Api": {
+          "id": "",
+          "name": "QuickBooks Online account"
+        }
+      }
+    },
+    {
+      "id": "a5",
+      "name": "Summarize by State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Groups the month's QuickBooks invoices by state, totals sales and sales tax, and flags\n// invoices likely to disagree with TaxCloud. Used as the \"Summarize by State\" Code node.\n// Input: one n8n item per QuickBooks query response page ({ QueryResponse: { Invoice: [...] } }).\n\nconst num = (v) => Number(v) || 0;\nconst round = (v) => Math.round(v * 100) / 100;\nconst US_STATES = new Set('AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY PR'.split(' '));\nconst RATE_LOW = 2, RATE_HIGH = 11; // effective tax rates (%) outside this range get flagged\n// States where we collect sales tax: invoices there with taxable lines but no tax get flagged.\nconst COLLECT_STATES = new Set(['AZ', 'CA', 'CO', 'FL', 'NV', 'TX']);\n\nfunction stateOf(inv) {\n  for (const addr of [inv.ShipAddr, inv.BillAddr]) {\n    if (!addr) continue;\n    if (addr.CountrySubDivisionCode) return addr.CountrySubDivisionCode.trim().toUpperCase();\n    // Free-form addresses: look for \"City, ST 12345\" in the address lines.\n    const text = [addr.Line1, addr.Line2, addr.Line3, addr.Line4, addr.Line5, addr.City].filter(Boolean).join(' ');\n    const m = text.match(/\\b([A-Z]{2})\\s+\\d{5}(-\\d{4})?\\b/);\n    if (m) return m[1];\n  }\n  return 'UNKNOWN';\n}\n\nfunction shipTo(inv) {\n  const a = inv.ShipAddr?.Line1 ? inv.ShipAddr : (inv.BillAddr ?? {});\n  return [a.Line1, a.Line2, a.Line3, a.City, a.CountrySubDivisionCode, a.PostalCode].filter(Boolean).join(', ').replace(/\\s+/g, ' ');\n}\n\nconst invoices = $input.all().flatMap((item) => item.json.QueryResponse?.Invoice ?? []);\nconst meta = $('Set Report Month').first().json;\n\nconst byState = {};\nconst unknown = [];\nconst detail = [];\nconst exceptions = [];\n\nfor (const inv of invoices) {\n  const state = stateOf(inv);\n  const s = (byState[state] ??= {\n    state, invoices: 0, sales: 0, discounts: 0, netSales: 0, taxableSales: 0,\n    salesTax: 0, depositsBilled: 0, depositsApplied: 0, totalInvoiced: 0,\n  });\n  let goods = 0, taxable = 0, disc = 0, tax = 0, depPos = 0, depNeg = 0;\n  for (const line of inv.Line ?? []) {\n    const amt = num(line.Amount);\n    if (line.DetailType === 'DiscountLineDetail') { disc += amt; continue; }\n    if (line.DetailType !== 'SalesItemLineDetail') continue; // skip subtotal lines\n    const d = line.SalesItemLineDetail ?? {};\n    const name = d.ItemRef?.name ?? '';\n    if (/sales tax/i.test(name)) tax += amt;\n    else if (/deposit/i.test(name)) (amt < 0 ? (depNeg += amt) : (depPos += amt));\n    else {\n      goods += amt;\n      if (d.TaxCodeRef?.value === 'TAX') taxable += amt;\n    }\n  }\n  // Also pick up tax calculated by QuickBooks' own sales tax engine, if any.\n  tax += num(inv.TxnTaxDetail?.TotalTax);\n  const net = goods - disc;\n  const taxBase = Math.max(taxable - disc, 0);\n  s.invoices += 1;\n  s.sales += goods;\n  s.discounts += disc;\n  s.netSales += net;\n  s.taxableSales += tax ? taxBase : 0;\n  s.salesTax += tax;\n  s.depositsBilled += depPos;\n  s.depositsApplied += depNeg;\n  s.totalInvoiced += num(inv.TotalAmt);\n\n  const rate = tax && taxBase ? (tax / taxBase) * 100 : null;\n  const base = { state, doc: inv.DocNumber, date: inv.TxnDate, customer: inv.CustomerRef?.name ?? '', shipTo: shipTo(inv) };\n  const issues = [];\n  if (state === 'UNKNOWN') {\n    issues.push('No state on ship-to or bill-to address');\n    unknown.push({ doc: inv.DocNumber, customer: base.customer, total: num(inv.TotalAmt) });\n  } else if (!US_STATES.has(state)) issues.push(`\"${state}\" is not a US state code`);\n  if (!tax && taxBase > 0 && COLLECT_STATES.has(state)) issues.push(`$${round(taxBase).toFixed(2)} of lines coded taxable but no tax charged`);\n  if (rate !== null && (rate < RATE_LOW || rate > RATE_HIGH)) issues.push(`Unusual effective tax rate ${rate.toFixed(2)}%`);\n  for (const issue of issues) exceptions.push({ ...base, issue, netSales: round(net), salesTax: round(tax), total: round(num(inv.TotalAmt)) });\n\n  detail.push({\n    ...base,\n    type: goods === 0 && depPos > 0 ? 'Deposit invoice' : tax ? 'Taxed' : 'No tax',\n    netSales: round(net), taxableSales: round(tax ? taxBase : 0), salesTax: round(tax),\n    effectiveRate: rate === null ? '' : rate.toFixed(2) + '%',\n    deposits: round(depPos + depNeg), total: round(num(inv.TotalAmt)), flags: issues.join('; '),\n  });\n}\n\nconst rows = Object.values(byState)\n  .map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, typeof v === 'number' && k !== 'invoices' ? round(v) : v])))\n  .sort((a, b) => (a.state === 'UNKNOWN') - (b.state === 'UNKNOWN') || b.netSales - a.netSales);\n\nconst totals = rows.reduce((t, r) => {\n  for (const k of Object.keys(r)) if (typeof r[k] === 'number') t[k] = round((t[k] ?? 0) + r[k]);\n  return t;\n}, { state: 'TOTAL' });\n\nconst money = (v) => v.toLocaleString('en-US', { style: 'currency', currency: 'USD' });\nconst esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');\nconst cell = 'padding:4px 10px;border:1px solid #ccc';\nconst cols = [['state', 'State'], ['invoices', 'Invoices'], ['netSales', 'Net sales'], ['taxableSales', 'Taxable sales (taxed invoices)'], ['salesTax', 'Sales tax'], ['totalInvoiced', 'Total invoiced']];\nconst tr = (r, tag = 'td') => '<tr>' + cols.map(([k]) => `<${tag} style=\"${cell};text-align:${k === 'state' ? 'left' : 'right'}\">${typeof r[k] === 'number' && k !== 'invoices' ? money(r[k]) : r[k]}</${tag}>`).join('') + '</tr>';\n\nlet html = `<h2>Sales &amp; sales tax by state: ${meta.label}</h2>\n<p>${invoices.length} invoices dated ${meta.startDate} to ${meta.endDate}.</p>\n<table style=\"border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px\">\n<tr>${cols.map(([, h]) => `<th style=\"${cell};background:#f2f2f2\">${h}</th>`).join('')}</tr>\n${rows.map((r) => tr(r)).join('\\n')}\n${tr(totals, 'th')}\n</table>\n<p style=\"font-size:12px;color:#555\">Net sales = products and fees less discounts, before deposits and tax.\nState is taken from the invoice ship-to address, then the bill-to address.</p>`;\n\nexceptions.sort((a, b) => a.state.localeCompare(b.state) || a.date.localeCompare(b.date));\nif (exceptions.length) {\n  const ecols = [['doc', 'Invoice'], ['date', 'Date'], ['state', 'State'], ['customer', 'Customer'], ['issue', 'Issue'], ['salesTax', 'Tax charged'], ['total', 'Invoice total']];\n  html += `<h3>Check before filing / reconciling to TaxCloud (${exceptions.length})</h3>\n<p style=\"font-size:12px;color:#555\">These invoices are the usual cause of TaxCloud mismatches: taxable lines with no tax charged, unusual tax rates, and missing or invalid states.</p>\n<table style=\"border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px\">\n<tr>${ecols.map(([, h]) => `<th style=\"${cell};background:#f2f2f2\">${h}</th>`).join('')}</tr>\n${exceptions.map((e) => '<tr>' + ecols.map(([k]) => `<td style=\"${cell};text-align:${typeof e[k] === 'number' ? 'right' : 'left'}\">${typeof e[k] === 'number' ? money(e[k]) : esc(e[k])}</td>`).join('') + '</tr>').join('\\n')}\n</table>`;\n} else {\n  html += '<p><b>No exceptions found.</b></p>';\n}\nhtml += '<p style=\"font-size:12px;color:#555\">Attached: state summary and invoice-level detail (CSV).</p>';\n\nconst csvCell = (v) => (/[\",\\n]/.test(String(v)) ? `\"${String(v).replace(/\"/g, '\"\"')}\"` : String(v ?? ''));\nconst toCsv = (header, keys, list) => [header.map(csvCell).join(','), ...list.map((r) => keys.map((k) => csvCell(r[k])).join(','))].join('\\n');\nconst csv = toCsv(cols.map(([, h]) => h), cols.map(([k]) => k), [...rows, totals]);\nconst dkeys = ['state', 'doc', 'date', 'customer', 'shipTo', 'type', 'netSales', 'taxableSales', 'salesTax', 'effectiveRate', 'deposits', 'total', 'flags'];\nconst detailCsv = toCsv(['State', 'Invoice', 'Date', 'Customer', 'Ship to', 'Type', 'Net sales', 'Taxable sales', 'Sales tax', 'Effective rate', 'Deposits billed(+)/applied(-)', 'Invoice total', 'Flags'], dkeys,\n  detail.sort((a, b) => a.state.localeCompare(b.state) || a.date.localeCompare(b.date)));\nconst month = meta.startDate.slice(0, 7);\n\nreturn [{ json: { month: meta.label, subject: `Sales tax by state: ${meta.label}` + (exceptions.length ? ` (${exceptions.length} to check)` : ''), html, rows, totals, unknown, exceptions },\n  binary: {\n    data: { data: Buffer.from(csv).toString('base64'), mimeType: 'text/csv', fileName: `sales-tax-by-state-${month}.csv` },\n    detail: { data: Buffer.from(detailCsv).toString('base64'), mimeType: 'text/csv', fileName: `sales-tax-invoice-detail-${month}.csv` },\n  } }];\n"
+      }
+    },
+    {
+      "id": "a6",
+      "name": "Email Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        960,
+        100
+      ],
+      "parameters": {
+        "sendTo": "REPLACE_WITH_RECIPIENT_EMAIL",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false,
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": "data"
+              },
+              {
+                "property": "detail"
+              }
+            ]
+          }
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Set Report Month",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Report Month": {
+      "main": [
+        [
+          {
+            "node": "Get Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Invoices": {
+      "main": [
+        [
+          {
+            "node": "Summarize by State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize by State": {
+      "main": [
+        [
+          {
+            "node": "Email Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monthly on the 3rd": {
+      "main": [
+        [
+          {
+            "node": "Set Report Month",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Los_Angeles"
+  }
+}
