@@ -123,7 +123,9 @@ def read_rows(path, sheet=None):
             continue
         inv_no = str(r[COL["inv_no"]] or "").strip()
         stage = str(r[COL["stage"]] or "").strip()
-        doc_number = str(r[COL["comm_memo"]] or "").strip() or f"{inv_no} {stage}".strip()
+        # Built from the invoice # and Final/Deposit rather than read from the Comm Memo column,
+        # whose formula is sometimes pointed at the wrong cells (e.g. "46269 Socal Glass ...").
+        doc_number = f"{inv_no} {stage}".strip() or str(r[COL["comm_memo"]] or "").strip()
         customer = str(r[COL["customer"]] or "").strip()
         panda_amt = r[COL["panda_amt"]]
         rate = r[COL["rate"]]
