@@ -62,7 +62,28 @@ Extra bills:
    - rates or amounts that look unusual next to past payrolls
    - any layout change; the script stops if headers in E, F, M, N, O or P move
 
-5. **Posting (user, on the server, from the app folder):**
+5. **Posting.** Either way, only after the user has reviewed the check workbook
+   and said to post.
+
+   **From a cloud session (how the Oct 26 2026 run was done):** the
+   workbook is in the user's OneDrive (search it with the Microsoft 365
+   connector, read with `read_resource`). Post through n8n's
+   "QuickBooks Online account" credential (`quickBooksOAuth2Api`, realm
+   9341454547526446), the way the Oct 26 workflows do. Copy both of them:
+   "Commission Bills Oct 26 - Lookup (read-only)" and
+   "Commission Bills Oct 26 2026 (one-time post)".
+   - Run a read-only lookup first. It returns vendor IDs, customer IDs by
+     full name, the account (6800 Sales Commissions = 976), the class
+     (Operations = 811565), and existing bills with the same numbers.
+     Skip any bill whose number and vendor already exist.
+   - The "Q Number/PO #" box is custom field DefinitionId 1000000016. Use
+     minorversion=75&include=enhancedAllCustomFields. Past commission
+     bills use the default Accounts Payable.
+   - Post one bill, check it, dry-run the rest with the POST node disabled,
+     then post. Afterwards disable the POST node so a re-run can't
+     duplicate the bills.
+
+   **From the server (app folder):**
 
    ```bash
    venv/bin/python commission_bills.py <workbook.xlsx>          # preview
