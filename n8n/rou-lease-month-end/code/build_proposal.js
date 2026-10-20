@@ -129,7 +129,14 @@ for (const [id, rows] of Object.entries(byLease)) {
     months[m] = { bom, pay, int, exp: e, red, adj, gAdj, L, R, G, pending };
   }
   const at = m => months[m] || (m < s1.start ? { L: num(s1.row.opening_liability), R: num(s1.row.opening_net_rou), G: num(s1.row.opening_gross_rou) ?? num(s1.row.opening_net_rou), pay: 0, int: 0, exp: 0, red: 0, adj: 0, gAdj: 0 } : null);
-  const cur = m => { const a = at(m), b = at(m + 12); return a ? a.L - (b ? b.L : 0) : 0; };
+  // Current = principal paid down over the next 12 months; a later remeasurement adds liability, it doesn't reduce this one.
+  const cur = m => {
+    const a = at(m);
+    if (!a) return 0;
+    let c = 0;
+    for (let j = m + 1; j <= m + 12; j++) { const x = months[j]; if (x) c += x.pay - x.int; }
+    return Math.min(a.L, c);
+  };
   const t = at(T);
   const prev = at(T - 1);
   if (!t) continue;

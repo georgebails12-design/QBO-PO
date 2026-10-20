@@ -82,6 +82,12 @@ const lagEnd = end.leases.find(l => l.name === 'Laguna Hills SR');
 close(lagEnd.L, 0, 0.01, 'Laguna liability at end');
 close(lagEnd.R, 0, 0.01, 'Laguna ROU at end');
 
+// 5b. Before the renewal starts, the current / noncurrent split doesn't change with the renewal rate.
+for (const p of ['2026-06', '2026-08']) {
+  const a = run(p, seed, {}), b = run(p, withRate, {});
+  close(a.target.current, b.target.current, 0.01, p + ' current portion unaffected by a later renewal');
+}
+
 // 6. A second run in the same month after the JE is posted proposes nothing.
 const again = run('2026-07', seed, { [ACC.rou]: jul.target.rou, [ACC.accum]: jul.target.accum, [ACC.current]: jul.target.current, [ACC.noncurrent]: jul.target.noncurrent },
   [{ Id: '1', DocNumber: 'ROU-202607' }]);
