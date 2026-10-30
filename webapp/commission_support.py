@@ -59,40 +59,83 @@ def page_texts(path):
 
 
 def _ocr(page):
+    """Read a scanned page: Tesseract first, RapidOCR if Tesseract is missing or
+    finds no 5-digit number (invoice # / Q#) on the page."""
+    from glass_ocr import remove_colored_ink
+    img = remove_colored_ink(page.to_image(resolution=OCR_DPI).original.convert("RGB"))
+    text, missing = "", []
     try:
         import pytesseract
-        from glass_ocr import remove_colored_ink
-    except ImportError as e:
-        raise SystemExit(f"This scan needs OCR but it isn't available here ({e}). "
-                         "Install tesseract-ocr and pytesseract (see glass_ocr.py).")
-    img = remove_colored_ink(page.to_image(resolution=OCR_DPI).original.convert("RGB"))
-    try:
-        return pytesseract.image_to_string(img)
-    except pytesseract.TesseractNotFoundError:
-        raise SystemExit("This scan needs OCR but the tesseract program isn't installed "
-                         "(apt-get install tesseract-ocr).")
+        text = pytesseract.image_to_string(img)
+    except ImportError:
+        missing.append("pytesseract")
+    except Exception as e:  # TesseractNotFoundError and friends
+        missing.append(f"tesseract ({type(e).__name__})")
+    if not NUMBER.search(text):
+        try:
+            import numpy as np
+            from glass_ocr import _rapid_engine
+            engine = _rapid_engine()
+            if engine is not None:
+                res, _ = engine(np.array(img))
+                rapid = "\n".join(r[1] for r in (res or []))
+                if NUMBER.search(rapid) or not text:
+                    text = rapid
+            elif missing:
+                missing.append("rapidocr")
+        except ImportError:
+            missing.append("rapidocr")
+    if not text and missing:
+        raise cb.CommissionError("This scan needs OCR but none is available (" + ", ".join(missing) + "). "
+                         "Install tesseract-ocr + pytesseract or rapidocr_onnxruntime.")
+    return text
 
 
-def match_pages(pages, invoices):
+# A 5-digit number that is not part of a dollar amount ($18,409.42 / 17563.50),
+# a fraction (166 31/32) or a longer number.
+NUMBER = re.compile(r"(?<![\d$.,/])(\d{5})(?!\d|[.,]\d|\s*/\s*\d)")
+
+
+def q_base(q):
+    """'92119/3764' and '90500.1' are the same job as '92119' and '90500'."""
+    return re.split(r"[/.\s-]", str(q or "").strip())[0]
+
+
+def match_pages(pages, invoices, q_numbers=None):
     """Assign pages to invoice numbers.
 
+    q_numbers maps a job's Q# to its invoice number(s); a page with no invoice
+    number but a sheet Q# (crating sheet, Panda Number Report) goes to that job.
     Returns (groups {invoice: [page_no]}, notes [str], extra {number: [page_no]})."""
     inv_set = set(invoices)
+    qmap = {q_base(k): v for k, v in (q_numbers or {}).items() if q_base(k)}
     nums = [int(n) for n in invoices if n.isdigit()]
     lo, hi = (min(nums) - NEAR_RANGE, max(nums) + NEAR_RANGE) if nums else (0, -1)
     groups = {n: [] for n in invoices}
     extra, notes = {}, []
     last = None
     for page_no, text, how in pages:
-        found = sorted({t for t in re.findall(r"\b\d{5}\b", text) if t in inv_set})
-        near = sorted({t for t in re.findall(r"\b\d{5}\b", text)
-                       if t not in inv_set and lo <= int(t) <= hi})
+        tokens = set(NUMBER.findall(text))
+        found = sorted(t for t in tokens if t in inv_set)
+        near = sorted(t for t in tokens if t not in inv_set and lo <= int(t) <= hi and t not in qmap)
+        by_q = []
+        if not found:
+            # The first Q# on the page is the header's; later ones are usually references.
+            q = next((t for t in re.findall(r"\d{5,}", text) if t in qmap), None)
+            if q:
+                cands = qmap[q]
+                by_q = [c for c in cands if last and c in last] or cands[:1]
         for t in near:
             extra.setdefault(t, []).append(page_no)
         if found:
             for n in found:
                 groups[n].append(page_no)
             last = found
+        elif by_q:
+            for n in by_q:
+                groups[n].append(page_no)
+            notes.append(f"page {page_no}: no invoice #, matched by Q# to {', '.join(by_q)}")
+            last = by_q
         elif near:                    # a page for an invoice that isn't on the sheet
             last = None
         elif not text.strip():
@@ -104,6 +147,18 @@ def match_pages(pages, invoices):
         else:
             notes.append(f"page {page_no}: no invoice # found and nothing before it -- not attached")
     return groups, notes, extra
+
+
+def q_numbers_for(rows):
+    """{Q#: [invoice numbers]} from the sheet rows."""
+    out = {}
+    for r in rows:
+        inv = r["doc_number"].split()[0]
+        if r.get("q_number"):
+            out.setdefault(q_base(r["q_number"]), [])
+            if inv not in out[q_base(r["q_number"])]:
+                out[q_base(r["q_number"])].append(inv)
+    return out
 
 
 def split_pdf(path, groups, out_dir):
@@ -185,7 +240,7 @@ def main():
     invoices = sorted({r["doc_number"].split()[0] for r in rows})
 
     pages = page_texts(args.scan)
-    groups, notes, extra = match_pages(pages, invoices)
+    groups, notes, extra = match_pages(pages, invoices, q_numbers_for(rows))
     print(f"{os.path.basename(args.scan)}: {len(pages)} page(s); sheet '{sheet_name}' has {len(invoices)} invoice(s)\n")
 
     missing = [n for n in invoices if not groups[n]]

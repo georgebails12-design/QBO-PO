@@ -693,7 +693,8 @@ def _commission_check(job_dir):
     if os.path.exists(scan):
         invoices = sorted({r["doc_number"].split()[0] for r in plan["rows"]})
         pages = commission_support.page_texts(scan)
-        groups, notes, extra = commission_support.match_pages(pages, invoices)
+        groups, notes, extra = commission_support.match_pages(pages, invoices,
+                                                              commission_support.q_numbers_for(plan["rows"]))
         commission_support.split_pdf(scan, groups, os.path.join(job_dir, "support"))
         missing = [{"doc": r["doc_number"], "rep": r["rep"], "amount": float(r["amount"]), "customer": r["customer"]}
                    for r in plan["rows"] if not groups[r["doc_number"].split()[0]]]
