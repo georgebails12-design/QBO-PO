@@ -55,6 +55,26 @@ Extra bills:
    SendUserFile. Keep it in the scratchpad and never commit it, because the
    repo may be public and the workbook shows each rep's pay.
 
+3b. **Check the scanned support (if the user uploads it).** This is the paper
+   backup for each paid invoice, scanned to one PDF. Run:
+
+   ```bash
+   cd webapp && python3 commission_support.py <workbook.xlsx> <scan.pdf> --out <scratchpad>/support
+   ```
+
+   It reads every page (with OCR on a copier scan) and matches pages to the
+   sheet's invoice numbers. It reports:
+   - **MISSING SUPPORT:** a sheet row with no page.
+   - **In the scan but not on the sheet:** an invoice number with no
+     commission row, which may be a missing commission.
+   - **Pages to look at:** a page with no invoice number is kept with the
+     page before it.
+
+   It then writes one PDF per invoice. If OCR isn't available (this cloud
+   sandbox has no tesseract), read the scan's pages yourself with the Read
+   tool and make the same comparison. Put both lists in the report to the
+   user.
+
 4. **Report to the user:** bill count, total, totals by vendor, and anything
    to decide. Flag:
    - notes in columns A or T (e.g. "Troy", "Mary", "01-15"), which aren't billed
@@ -96,3 +116,20 @@ Extra bills:
    the user should fill that box by hand on any one bill and re-run, or pass
    `--q-field-id`. Re-running is safe: a bill with the same number and vendor
    is skipped.
+
+6. **Attach the support** once the bills are posted, from the server:
+
+   ```bash
+   venv/bin/python commission_support.py <workbook.xlsx> <scan.pdf> --attach
+   ```
+
+   Every bill for that invoice that is due on this payroll date gets the
+   invoice's PDF, including shared-deal and 2nd Comm bills. A bill that
+   already has the same file is skipped. It also lists bills that aren't
+   posted yet.
+
+   This cloud session can't reach n8n.pandawd.online (the proxy refuses
+   it), and n8n has no OneDrive connection, so it can't send the PDFs to
+   QuickBooks from here. Either run the server command, or have the user
+   allow that host in the environment's network settings or add a OneDrive
+   credential in n8n.

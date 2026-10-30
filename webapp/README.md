@@ -108,3 +108,16 @@ each vendor; the "2nd Comm" column is billed to the vendor under the
 `"2nd Comm"` key). Bills that already exist (same
 number and vendor) are skipped, so re-running is safe. `--export file.csv`
 also writes the bills in the QuickBooks import-sheet layout.
+
+### Commission support (scanned backup)
+
+`commission_support.py` checks the scanned commission support PDF against
+the workbook. It flags rows with no support page and invoice numbers in
+the scan that aren't on the sheet, and splits the scan into one PDF per
+invoice. Run it with `--attach` after posting to attach each invoice's PDF
+to its bills (safe to re-run):
+
+```bash
+venv/bin/python commission_support.py Payroll_Com_Nov_9th_2026.xlsx support.pdf            # check
+venv/bin/python commission_support.py Payroll_Com_Nov_9th_2026.xlsx support.pdf --attach   # after posting
+```
