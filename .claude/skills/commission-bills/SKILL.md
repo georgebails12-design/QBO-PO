@@ -55,6 +55,35 @@ Extra bills:
    SendUserFile. Keep it in the scratchpad and never commit it, because the
    repo may be public and the workbook shows each rep's pay.
 
+3a. **Check monday.com.** The Invoicing board (id 7469134121, in
+   "monday CRM - Panda") holds every job's commission dates: Deposit,
+   Final, 2nd Deposit, CO/Expedite and 2nd CO/Expedite. For each it has a
+   Panda #, the in-house reps and %, the sales assistant %, any outside rep,
+   and Commission Notes. Pull the items whose commission date is the payroll
+   date. Use `get_board_items_page` with filtersOperator "or" and one rule per
+   date column: `{"columnId": "<col>", "operator": "any_of", "compareValue":
+   ["EXACT", "YYYY-MM-DD"]}` for date_mkme9g50, date_mkmengp1, date_mkmeq670,
+   date_mkme5mt2 and date_mknrtqdn. Set includeColumns true, no columnIds, and
+   limit 200. The result is large, so it is saved to a tool-results file;
+   pass that file to:
+
+   ```bash
+   python3 .claude/skills/commission-bills/scripts/monday_check.py <saved result> YYYY-MM-DD \
+       --workbook <workbook.xlsx> --xlsx <check workbook.xlsx>
+   ```
+
+   It adds a "Monday check" tab to the check workbook and lists:
+   - **NOT ON SHEET:** monday has a commission dated for this payroll with
+     no row on the sheet. This is usually a missed commission.
+   - **DIFFERS:** reps, rate, the sales-assistant 0.5%, Panda # or
+     Deposit/Final differ. A rate written in Commission Notes (e.g.
+     "Derrick 6 / Panda 3") overrides the % column.
+   - **NOT ON MONDAY FOR THIS DATE:** a sheet row whose monday commission
+     date is different or empty.
+
+   Raise every finding with the user before posting. Monday often lists
+   more than one rep or a sales assistant that the sheet leaves out.
+
 3b. **Check the scanned support (if the user uploads it).** This is the paper
    backup for each paid invoice, scanned to one PDF. Run:
 

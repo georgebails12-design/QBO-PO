@@ -146,6 +146,8 @@ def read_rows(path, sheet=None):
             "second_description": f"{doc_number} {customer} P#$ {panda_txt} {second_rate}".strip(),
             "description": f"{doc_number} {customer} P#$ {panda_txt} {rate_txt}".strip(),
             "q_number": str(r[COL["q_number"]] or "").strip(),
+            "panda": float(panda_amt) if isinstance(panda_amt, (int, float)) else None,
+            "rate": float(rate) if isinstance(rate, (int, float)) else None,
         })
     return ws.title, rows
 
