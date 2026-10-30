@@ -100,8 +100,17 @@ def person(s):
     return "" if cb.norm(s) in NOT_A_PERSON else s.strip()
 
 
+NICKNAMES = {"bill": "william", "will": "william", "mike": "michael", "dave": "david", "alex": "alexander"}
+
+
+def q_base(q):
+    """'92119/3764' and '90500.1' are the same job as '92119' and '90500' on the sheet."""
+    return re.split(r"[/.]", str(q or "").strip())[0]
+
+
 def same_person(monday_name, vendor_name):
-    a, b = set(cb.norm(monday_name).split()), set(cb.norm(vendor_name).split())
+    a = {NICKNAMES.get(t, t) for t in cb.norm(monday_name).split()}
+    b = {NICKNAMES.get(t, t) for t in cb.norm(vendor_name).split()}
     return bool(a) and (a <= b or b <= a)
 
 
@@ -140,7 +149,7 @@ def compare(mlines, rows, vendor_map, second_vendor):
     findings = []
     used = set()
     for m in mlines:
-        cands = [i for i, r in enumerate(rows) if r["q_number"] == m["q"] and i not in used]
+        cands = [i for i, r in enumerate(rows) if q_base(r["q_number"]) == q_base(m["q"]) and i not in used]
         exact = [i for i in cands if m["panda"] is not None and r_panda(rows[i]) is not None
                  and abs(r_panda(rows[i]) - m["panda"]) <= 1]
         pick = (exact or cands or [None])[0]

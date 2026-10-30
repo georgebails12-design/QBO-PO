@@ -36,7 +36,10 @@ for r in rows:
     m = vm[cb.norm(r["rep"])]
     vendors = [m] if isinstance(m, str) else m
     for v in vendors:
-        bills.append((r, v, r["amount"], x[13], r["description"], "Commission" if len(vendors) == 1 else f"Shared deal ({r['rep']})"))
+        name, share = (v, 1.0) if isinstance(v, str) else (v["vendor"], float(v.get("share", 1)))
+        desc = r["description"] if share == 1 else r["description"].rsplit(" ", 1)[0] + f" {cb.fmt_rate(x[13] * share)}"
+        bills.append((r, name, cb.money(r["amount"] * cb.Decimal(str(share))), x[13] * share, desc,
+                      "Commission" if len(vendors) == 1 else f"Shared deal ({r['rep']})"))
     if r["second"]:
         bills.append((r, vm[cb.norm("2nd Comm")], r["second"], 0.005, r["second_description"], "2nd Comm override"))
 
@@ -85,10 +88,13 @@ for c in s[e + 1]: c.font = Font(bold=True)
 
 # Reconciliation to the source sheet (amounts as on the source sheet)
 o = sum(float(r["amount"]) for r in rows); p = sum(float(r["second"] or 0) for r in rows)
-extra = sum(float(r["amount"]) * (len(vm[cb.norm(r["rep"])]) - 1) for r in rows if not isinstance(vm[cb.norm(r["rep"])], str))
+def shares(m):
+    return [1.0] if isinstance(m, str) else [1.0 if isinstance(v, str) else float(v.get("share", 1)) for v in m]
+extra = sum(float(cb.money(r["amount"] * cb.Decimal(str(sh)))) for r in rows
+            for sh in shares(vm[cb.norm(r["rep"])])[1:])
 recon = [("Commission column (O) on source sheet", round(o, 2)),
          ("2nd Comm column (P) - billed to " + vm[cb.norm("2nd Comm")], round(p, 2)),
-         ("Shared deals (TE/ETA/TEA) - second rep paid the same amount", round(extra, 2))]
+         ("Shared deals - other reps on the same row", round(extra, 2))]
 base = e + 3
 s.cell(base, 1, "Reconciliation to " + sheet + " sheet").font = Font(bold=True)
 for k, (label, val) in enumerate(recon, 1):

@@ -20,5 +20,19 @@
     "BENTHAGEN TREVOR",
     "ZARATE EFRAIN"
   ],
+  "ET": [
+    "BENTHAGEN TREVOR",
+    "ZARATE EFRAIN"
+  ],
+  "EA": "ZARATE EFRAIN",
+  "ETG": [
+    "ZARATE EFRAIN",
+    "BENTHAGEN TREVOR",
+    {
+      "vendor": "BRAWNER GREG",
+      "share": 0.666667
+    }
+  ],
+  "William": "DAVENENPORT WILLIAM",
   "2nd Comm": "PUTNAM ANN MARIE"
 }

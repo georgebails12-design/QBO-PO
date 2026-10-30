@@ -99,7 +99,7 @@ def due_date_from_sheet(sheet_name, rows):
 # ---------------------------------------------------------------------------
 # Spreadsheet
 # ---------------------------------------------------------------------------
-def read_rows(path, sheet=None):
+def read_rows(path, sheet=None, start_row=2):
     wb = openpyxl.load_workbook(path, data_only=True)
     ws = wb[sheet] if sheet else wb.worksheets[0]
     all_rows = list(ws.iter_rows(values_only=True))
@@ -116,10 +116,17 @@ def read_rows(path, sheet=None):
 
     rows = []
     for excel_row, r in enumerate(all_rows[1:], start=2):
-        r = list(r) + [None] * (20 - len(r))
+        if excel_row < start_row:
+            continue
+        r = list(r) + [None] * (21 - len(r))
+        rate_cell, next_cell = r[COL["rate"]], r[COL["rate"] + 1]
+        if (not (isinstance(rate_cell, (int, float)) and rate_cell < 1)
+                and isinstance(next_cell, (int, float)) and 0 < next_cell < 1 and r[10] in (None, "")):
+            r = r[:10] + r[11:]  # row typed one column to the right (blank in K): shift it back
         rep = str(r[COL["rep"]] or "").strip()
         commission = r[COL["commission"]]
-        if not rep or commission in (None, "") or str(r[COL["kind"]] or "").strip() != "Invoice":
+        if (not rep or commission in (None, "") or str(r[COL["kind"]] or "").strip() != "Invoice"
+                or (isinstance(commission, (int, float)) and abs(commission) < 0.005)):
             continue
         inv_no = str(r[COL["inv_no"]] or "").strip()
         stage = str(r[COL["stage"]] or "").strip()
@@ -313,7 +320,10 @@ def plan_bills(rows, lk, due_date, account, klass, q_field=None):
         if len(r["doc_number"]) > 21:
             problems.append((r, f"bill number '{r['doc_number']}' is longer than QuickBooks' 21 characters"))
             continue
-        lines = [(vendor, money(r["amount"] * share), how, r["description"]) for vendor, share, how in payees]
+        lines = [(vendor, money(r["amount"] * share), how,
+                  r["description"] if share == 1 or r["rate"] is None
+                  else r["description"].rsplit(" ", 1)[0] + " " + fmt_rate(r["rate"] * float(share)))
+                 for vendor, share, how in payees]
         if r["second"]:
             if not second_vendor:
                 problems.append((r, f"has 2nd Comm {r['second']:,.2f} but no '{SECOND_COMM_KEY}' vendor is set "
@@ -370,6 +380,8 @@ def main():
     ap.add_argument("--post", action="store_true", help="actually create the bills (default: preview only)")
     ap.add_argument("--due-date", help="payroll/due date, MM/DD/YYYY (default: from the sheet name, e.g. 'Oct 26')")
     ap.add_argument("--sheet", help="sheet name (default: first sheet)")
+    ap.add_argument("--start-row", type=int, default=2,
+                    help="first sheet row of this payroll, when one sheet holds several (e.g. 43)")
     ap.add_argument("--account", default=DEFAULT_ACCOUNT, help=f"expense account (default: {DEFAULT_ACCOUNT})")
     ap.add_argument("--class", dest="klass", default=DEFAULT_CLASS, help=f"class (default: {DEFAULT_CLASS})")
     ap.add_argument("--q-field-id", help="DefinitionId of the bill's 'Q Number/PO #' custom field "
@@ -377,7 +389,7 @@ def main():
     ap.add_argument("--export", help="also write the bills to this CSV (QuickBooks import-sheet layout)")
     args = ap.parse_args()
 
-    sheet_name, rows = read_rows(args.workbook, args.sheet)
+    sheet_name, rows = read_rows(args.workbook, args.sheet, args.start_row)
     due_date = as_date(args.due_date) if args.due_date else due_date_from_sheet(sheet_name, rows)
     if not due_date:
         raise SystemExit(f"Couldn't read a due date from sheet name '{sheet_name}' -- pass --due-date MM/DD/YYYY")
