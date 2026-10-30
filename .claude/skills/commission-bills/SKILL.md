@@ -111,7 +111,19 @@ Extra bills:
    - rates or amounts that look unusual next to past payrolls
    - any layout change; the script stops if headers in E, F, M, N, O or P move
 
-5. **Posting.** Either way, only after the user has reviewed the check workbook
+5. **Posting.** Preferred route: the **Commission Bills page in the PO app**
+   (po.pandawd.online/commissions, "Commission Bills" in the menu). The user
+   uploads the workbook and the scanned support there, and enters the payroll
+   date and the first row. The page:
+   - runs the check, including missing support;
+   - creates the bills with **Post**, skipping any already in QuickBooks;
+   - attaches each invoice's pages to all its bills with **Attach support**.
+
+   Everything runs on the server, so no files go through n8n or OneDrive.
+   Run the monday.com check (3a) here first and settle the findings with the
+   user, because the page can't reach monday.
+
+   Other routes: Either way, only after the user has reviewed the check workbook
    and said to post.
 
    **From a cloud session (how the Oct 26 2026 run was done):** the

@@ -126,8 +126,11 @@ def support_filename(invoice):
     return f"Commission support {invoice}.pdf"
 
 
-def attach(files, rows, due_date):
-    """Attach each invoice's PDF to its bills that are due on due_date."""
+def attach_support(files, rows, due_date):
+    """Attach each invoice's PDF to its bills that are due on due_date.
+
+    Returns {"attached": [(bill id, bill #, vendor, file)], "skipped": n,
+             "no_file": [bill #], "not_posted": [bill #], "found": n}."""
     docs = sorted({r["doc_number"] for r in rows})
     inv_of_doc = {r["doc_number"]: r["doc_number"].split()[0] for r in rows}
     bills = []
@@ -136,30 +139,35 @@ def attach(files, rows, due_date):
         bills += qbo_client._query(
             f"SELECT Id, DocNumber, VendorRef, DueDate FROM Bill WHERE DocNumber IN ({in_list}) "
             f"AND DueDate = '{due_date.isoformat()}'")
-    done = skipped = 0
-    no_file = set()
+    out = {"attached": [], "skipped": 0, "no_file": set(), "found": len(bills)}
     for b in sorted(bills, key=lambda b: b["DocNumber"]):
-        inv = inv_of_doc.get(b["DocNumber"])
-        fp = files.get(inv)
-        who = f"{b['DocNumber']} / {b['VendorRef'].get('name', b['VendorRef']['value'])}"
+        fp = files.get(inv_of_doc.get(b["DocNumber"]))
         if not fp:
-            no_file.add(b["DocNumber"])
+            out["no_file"].add(b["DocNumber"])
             continue
         name = os.path.basename(fp)
         if any(a["file_name"] == name for a in qbo_client.get_attachments_for_entity("Bill", b["Id"])):
-            skipped += 1
+            out["skipped"] += 1
             continue
         with open(fp, "rb") as f:
             qbo_client.upload_attachment("Bill", b["Id"], name, f.read(), "application/pdf")
-        print(f"  attached {name} -> bill {b['Id']} ({who})")
-        done += 1
-    print(f"\nAttached {done}, already attached {skipped}, {len(bills)} bill(s) due {due_date:%m/%d/%Y} found.")
-    if no_file:
-        print("No support file for: " + ", ".join(sorted(no_file)))
+        out["attached"].append((b["Id"], b["DocNumber"], b["VendorRef"].get("name", b["VendorRef"]["value"]), name))
     found_docs = {b["DocNumber"] for b in bills}
-    not_posted = [d for d in docs if d not in found_docs]
-    if not_posted:
-        print("Not in QuickBooks yet (post first): " + ", ".join(not_posted))
+    out["no_file"] = sorted(out["no_file"])
+    out["not_posted"] = [d for d in docs if d not in found_docs]
+    return out
+
+
+def attach(files, rows, due_date):
+    res = attach_support(files, rows, due_date)
+    for bill_id, doc, vendor, name in res["attached"]:
+        print(f"  attached {name} -> bill {bill_id} ({doc} / {vendor})")
+    print(f"\nAttached {len(res['attached'])}, already attached {res['skipped']}, "
+          f"{res['found']} bill(s) due {due_date:%m/%d/%Y} found.")
+    if res["no_file"]:
+        print("No support file for: " + ", ".join(res["no_file"]))
+    if res["not_posted"]:
+        print("Not in QuickBooks yet (post first): " + ", ".join(res["not_posted"]))
 
 
 def main():

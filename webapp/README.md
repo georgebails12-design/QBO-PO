@@ -121,3 +121,13 @@ to its bills (safe to re-run):
 venv/bin/python commission_support.py Payroll_Com_Nov_9th_2026.xlsx support.pdf            # check
 venv/bin/python commission_support.py Payroll_Com_Nov_9th_2026.xlsx support.pdf --attach   # after posting
 ```
+
+### Commission Bills page
+
+`/commissions` (Commission Bills in the menu) does the same steps from the browser:
+1. Upload the commission workbook and the scanned support, and enter the payroll date and the first row of this payroll.
+2. **Check** shows the bills, totals by vendor, rows that can't be billed, and missing or extra support.
+3. **Post bills** creates them. Bills already in QuickBooks are skipped, so it's safe to click twice.
+4. **Attach support** adds each invoice's scanned pages to all of its bills.
+
+Each run is kept in `downloads/commissions/<id>/` (gitignored, excluded from deploys). Reopen a run with `?run=<id>`.

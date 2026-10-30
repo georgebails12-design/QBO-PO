@@ -15,6 +15,7 @@ login sessions survive a restart; a random one is generated otherwise
 """
 
 import concurrent.futures
+import json
 import os
 import re
 import secrets
@@ -28,6 +29,8 @@ from flask import Flask, Response, jsonify, redirect, render_template, request, 
 
 import auth
 import cardinal_glass_output
+import commission_bills
+import commission_support
 import glass_pdf_parser
 import qbo_client
 
@@ -130,6 +133,12 @@ def categories_page():
 @auth.login_required
 def purchase_orders_page():
     return render_template("view_purchase_orders.html", user=auth.current_user())
+
+
+@app.route("/commissions")
+@auth.login_required
+def commissions_page():
+    return render_template("commissions.html", user=auth.current_user())
 
 
 # ---------------------------------------------------------------------------
@@ -582,6 +591,214 @@ def download_file(name):
     if not os.path.abspath(path).startswith(os.path.abspath(DOWNLOAD_DIR)) or not os.path.exists(path):
         return err("Not found.", 404)
     return send_file(path, as_attachment=True, download_name=name)
+
+
+# ---------------------------------------------------------------------------
+# Commission bills: upload the payroll commission workbook (+ the scanned
+# support), check it, post the bills, then attach each invoice's support
+# pages to its bills. Each run lives in downloads/commissions/<id>/ and every
+# step runs in the background (OCR and 50 bills take a while); the page polls.
+# State is on disk so it works with more than one worker.
+# ---------------------------------------------------------------------------
+COMMISSION_DIR = os.path.join(DOWNLOAD_DIR, "commissions")
+COMMISSION_STEPS = ("check", "post", "attach")
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
+def _cjob_dir(job_id):
+    if not re.fullmatch(r"[0-9a-f]{32}", job_id or ""):
+        return None
+    path = os.path.join(COMMISSION_DIR, job_id)
+    return path if os.path.isdir(path) else None
+
+
+def _cjob_write(job_dir, name, data):
+    tmp = os.path.join(job_dir, name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, default=str)
+    os.replace(tmp, os.path.join(job_dir, name))
+
+
+def _cjob_read(job_dir, name, default=None):
+    try:
+        with open(os.path.join(job_dir, name), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def _cjob_start(job_dir, step, fn):
+    status = _cjob_read(job_dir, "status.json", {})
+    if status.get("state") == "running":
+        return False
+    _cjob_write(job_dir, "status.json", {"step": step, "state": "running", "started": time.time()})
+
+    def run():
+        try:
+            with TOKEN_LOCK:
+                qbo_client.get_valid_access_token()
+            result = fn(job_dir)
+            _cjob_write(job_dir, f"{step}.json", result)
+            _cjob_write(job_dir, "status.json", {"step": step, "state": "done"})
+        except (commission_bills.CommissionError, qbo_client.QBOError, ValueError) as exc:
+            _cjob_write(job_dir, "status.json", {"step": step, "state": "error", "error": str(exc)})
+        except Exception as exc:  # noqa: BLE001 -- report anything to the page instead of losing it
+            app.logger.exception("commission %s failed", step)
+            _cjob_write(job_dir, "status.json", {"step": step, "state": "error", "error": f"{type(exc).__name__}: {exc}"})
+
+    threading.Thread(target=run, daemon=True).start()
+    return True
+
+
+def _cjob_plan(job_dir):
+    meta = _cjob_read(job_dir, "meta.json")
+    return meta, commission_bills.prepare(os.path.join(job_dir, "workbook.xlsx"),
+                                          start_row=meta["start_row"], due_date=meta["due_date"])
+
+
+def _support_files(job_dir):
+    folder = os.path.join(job_dir, "support")
+    files = {}
+    if os.path.isdir(folder):
+        for name in os.listdir(folder):
+            m = re.fullmatch(r"Commission support (.+)\.pdf", name)
+            if m:
+                files[m.group(1)] = os.path.join(folder, name)
+    return files
+
+
+def _commission_check(job_dir):
+    meta, plan = _cjob_plan(job_dir)
+    already = plan["already"]
+    bills = [{
+        "row": b["row"]["excel_row"], "doc": b["row"]["doc_number"], "date": b["row"]["pay_date"].strftime("%m/%d/%Y"),
+        "vendor": b["vendor"]["DisplayName"], "amount": float(b["amount"]), "customer": b["row"]["customer"],
+        "description": b["description"], "q": b["row"]["q_number"], "rep": b["row"]["rep"],
+        "already": commission_bills.is_already(b, already),
+    } for b in plan["bills"]]
+    by_vendor = {}
+    for b in bills:
+        v = by_vendor.setdefault(b["vendor"], {"vendor": b["vendor"], "bills": 0, "amount": 0.0})
+        v["bills"] += 1
+        v["amount"] = round(v["amount"] + b["amount"], 2)
+    result = {
+        "due_date": plan["due_date"].strftime("%m/%d/%Y"), "sheet": plan["sheet_name"],
+        "rows": len(plan["rows"]), "bills": bills, "total": round(sum(b["amount"] for b in bills), 2),
+        "by_vendor": sorted(by_vendor.values(), key=lambda v: v["vendor"]),
+        "problems": [{"row": r["excel_row"], "doc": r["doc_number"], "rep": r["rep"], "amount": float(r["amount"]),
+                      "why": why} for r, why in plan["problems"]],
+        "q_field": bool(plan["q_field"]), "support": None,
+    }
+    scan = os.path.join(job_dir, "support.pdf")
+    if os.path.exists(scan):
+        invoices = sorted({r["doc_number"].split()[0] for r in plan["rows"]})
+        pages = commission_support.page_texts(scan)
+        groups, notes, extra = commission_support.match_pages(pages, invoices)
+        commission_support.split_pdf(scan, groups, os.path.join(job_dir, "support"))
+        missing = [{"doc": r["doc_number"], "rep": r["rep"], "amount": float(r["amount"]), "customer": r["customer"]}
+                   for r in plan["rows"] if not groups[r["doc_number"].split()[0]]]
+        result["support"] = {
+            "pages": len(pages), "missing": missing,
+            "extra": [{"number": n, "pages": p} for n, p in sorted(extra.items())],
+            "notes": notes, "matched": {n: p for n, p in groups.items() if p},
+        }
+    return result
+
+
+def _commission_post(job_dir):
+    _, plan = _cjob_plan(job_dir)
+    results = []
+    for b in plan["bills"]:
+        item = {"doc": b["row"]["doc_number"], "vendor": b["vendor"]["DisplayName"], "amount": float(b["amount"])}
+        if commission_bills.is_already(b, plan["already"]):
+            item["result"] = "already in QuickBooks"
+        else:
+            try:
+                bill_id, warning = commission_bills.post_bill(b)
+                item.update(result="created", id=bill_id, warning=warning)
+            except qbo_client.QBOError as exc:
+                item.update(result="failed", error=str(exc))
+        results.append(item)
+    return {"results": results,
+            "created": sum(r["result"] == "created" for r in results),
+            "failed": sum(r["result"] == "failed" for r in results),
+            "skipped": sum(r["result"] == "already in QuickBooks" for r in results),
+            "problems": len(plan["problems"])}
+
+
+def _commission_attach(job_dir):
+    meta = _cjob_read(job_dir, "meta.json")
+    _, rows = commission_bills.read_rows(os.path.join(job_dir, "workbook.xlsx"), start_row=meta["start_row"])
+    files = _support_files(job_dir)
+    if not files:
+        raise ValueError("No support pages to attach -- upload the scanned support and run the check first.")
+    res = commission_support.attach_support(files, rows, commission_bills.as_date(meta["due_date"]))
+    res["attached"] = [{"id": i, "doc": d, "vendor": v, "file": f} for i, d, v, f in res["attached"]]
+    return res
+
+
+@app.route("/api/commissions", methods=["POST"])
+@auth.login_required
+def api_commissions_new():
+    workbook = request.files.get("workbook")
+    scan = request.files.get("support")
+    due = commission_bills.as_date(request.form.get("due_date", ""))
+    if not workbook or not workbook.filename.lower().endswith((".xlsx", ".xlsm")):
+        return err("Choose the commission workbook (.xlsx).")
+    if not due:
+        return err("Enter the payroll date.")
+    try:
+        start_row = max(2, int(request.form.get("start_row") or 2))
+    except ValueError:
+        return err("Start row must be a number.")
+    job_id = uuid.uuid4().hex
+    job_dir = os.path.join(COMMISSION_DIR, job_id)
+    os.makedirs(job_dir)
+    for f, name in ((workbook, "workbook.xlsx"), (scan, "support.pdf")):
+        if not f or not f.filename:
+            continue
+        data = f.read()
+        if len(data) > MAX_UPLOAD_BYTES:
+            return err(f"{f.filename} is too large (50MB limit).")
+        if name == "support.pdf" and not data.startswith(b"%PDF"):
+            return err("The support scan must be a PDF.")
+        with open(os.path.join(job_dir, name), "wb") as out:
+            out.write(data)
+    _cjob_write(job_dir, "meta.json", {
+        "due_date": due.isoformat(), "start_row": start_row, "user": session.get("username"),
+        "workbook_name": workbook.filename, "support_name": scan.filename if scan and scan.filename else None,
+        "created": time.time(),
+    })
+    _cjob_start(job_dir, "check", _commission_check)
+    return jsonify({"id": job_id})
+
+
+@app.route("/api/commissions/<job_id>")
+@auth.login_required
+def api_commissions_status(job_id):
+    job_dir = _cjob_dir(job_id)
+    if not job_dir:
+        return err("Not found.", 404)
+    out = {"meta": _cjob_read(job_dir, "meta.json"), "status": _cjob_read(job_dir, "status.json", {})}
+    for step in COMMISSION_STEPS:
+        out[step] = _cjob_read(job_dir, f"{step}.json")
+    return jsonify(out)
+
+
+@app.route("/api/commissions/<job_id>/<step>", methods=["POST"])
+@auth.login_required
+def api_commissions_step(job_id, step):
+    job_dir = _cjob_dir(job_id)
+    if not job_dir:
+        return err("Not found.", 404)
+    fn = {"post": _commission_post, "attach": _commission_attach, "check": _commission_check}.get(step)
+    if not fn:
+        return err("Unknown step.", 404)
+    if step == "post" and not _cjob_read(job_dir, "check.json"):
+        return err("Run the check first.")
+    if not _cjob_start(job_dir, step, fn):
+        return err("Something is still running for this upload -- wait for it to finish.", 409)
+    return jsonify({"started": step})
 
 
 if __name__ == "__main__":

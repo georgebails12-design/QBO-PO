@@ -38,6 +38,10 @@ import requests
 import qbo_client
 
 VENDOR_MAP_FILE = os.path.join(qbo_client.APP_DIR, "commission_vendors.json")
+
+
+class CommissionError(Exception):
+    """A problem with the workbook or the QuickBooks setup, with a message safe to show."""
 DEFAULT_ACCOUNT = "6800 Sales Commissions"
 DEFAULT_CLASS = "Operations"
 
@@ -104,13 +108,13 @@ def read_rows(path, sheet=None, start_row=2):
     ws = wb[sheet] if sheet else wb.worksheets[0]
     all_rows = list(ws.iter_rows(values_only=True))
     if not all_rows:
-        raise SystemExit(f"{path}: sheet '{ws.title}' is empty")
+        raise CommissionError(f"{path}: sheet '{ws.title}' is empty")
 
     header = all_rows[0]
     for key, name in EXPECTED_HEADERS.items():
         got = header[COL[key]] if len(header) > COL[key] else None
         if str(got or "").strip() != name:
-            raise SystemExit(
+            raise CommissionError(
                 f"Unexpected layout: column {chr(65 + COL[key])} header is {got!r}, expected {name!r}. "
                 "Has a column been added or moved?")
 
@@ -199,14 +203,14 @@ class Lookups:
                      norm(f"{a.get('AcctNum', '')} {a['Name']}")}
             if want in names or (a.get("AcctNum") and want == norm(a["AcctNum"])):
                 return a
-        raise SystemExit(f"Account '{label}' not found in QuickBooks (use --account).")
+        raise CommissionError(f"Account '{label}' not found in QuickBooks (use --account).")
 
     def klass(self, label):
         want = norm(label)
         for c in self.classes:
             if want in (norm(c["Name"]), norm(c.get("FullyQualifiedName"))):
                 return c
-        raise SystemExit(f"Class '{label}' not found in QuickBooks (use --class).")
+        raise CommissionError(f"Class '{label}' not found in QuickBooks (use --class).")
 
     def customer(self, fqn):
         c = self.customer_by_fqn.get(norm(fqn))
@@ -306,7 +310,7 @@ def plan_bills(rows, lk, due_date, account, klass, q_field=None):
     second_name = lk.vendor_map.get(norm(SECOND_COMM_KEY))
     second_vendor = lk.vendor_by_display(second_name) if second_name else None
     if second_name and not second_vendor:
-        raise SystemExit(f"'{SECOND_COMM_KEY}' vendor '{second_name}' not found in QuickBooks")
+        raise CommissionError(f"'{SECOND_COMM_KEY}' vendor '{second_name}' not found in QuickBooks")
     for r in rows:
         try:
             payees = lk.payees(r["rep"])
@@ -383,6 +387,40 @@ def write_export(path, bills, due_date, account_label, class_label):
                         class_label, ""])
 
 
+def prepare(workbook, sheet=None, start_row=2, due_date=None, account=DEFAULT_ACCOUNT, klass=DEFAULT_CLASS,
+            q_field_id=None):
+    """Read the workbook and plan its bills against QuickBooks (nothing is created).
+
+    Returns {sheet_name, rows, due_date, bills, problems, already, q_field}. `already`
+    holds (bill number, vendor id) pairs that exist in QuickBooks and will be skipped."""
+    sheet_name, rows = read_rows(workbook, sheet, start_row)
+    due = as_date(due_date) if due_date else due_date_from_sheet(sheet_name, rows)
+    if not due:
+        raise CommissionError(f"Couldn't read a due date from sheet name '{sheet_name}' -- give the payroll date.")
+    lk = Lookups()
+    acct, kl = lk.account(account), lk.klass(klass)
+    q_field = ({"DefinitionId": q_field_id, "Name": "Q Number/PO #", "Type": "StringType"}
+               if q_field_id else find_q_field())
+    bills, problems = plan_bills(rows, lk, due, acct, kl, q_field)
+    already = existing_bills(b["row"]["doc_number"] for b in bills)
+    return {"sheet_name": sheet_name, "rows": rows, "due_date": due, "bills": bills, "problems": problems,
+            "already": already, "q_field": q_field}
+
+
+def is_already(b, already):
+    return (b["row"]["doc_number"], b["vendor"]["Id"]) in already
+
+
+def post_bill(b):
+    """Create one planned bill. Returns (QuickBooks bill id, warning or "")."""
+    saved = _cf_request("POST", "bill", payload=b["payload"])["Bill"]
+    warning = ""
+    if b["payload"].get("CustomField") and not any(
+            cf.get("StringValue") == b["row"]["q_number"] for cf in saved.get("CustomField") or []):
+        warning = "QuickBooks didn't keep the Q Number"
+    return saved["Id"], warning
+
+
 def main():
     ap = argparse.ArgumentParser(description="Create commission Bills in QuickBooks from the payroll commission sheet.")
     ap.add_argument("workbook", help="commissions .xlsx")
@@ -398,30 +436,25 @@ def main():
     ap.add_argument("--export", help="also write the bills to this CSV (QuickBooks import-sheet layout)")
     args = ap.parse_args()
 
-    sheet_name, rows = read_rows(args.workbook, args.sheet, args.start_row)
-    due_date = as_date(args.due_date) if args.due_date else due_date_from_sheet(sheet_name, rows)
-    if not due_date:
-        raise SystemExit(f"Couldn't read a due date from sheet name '{sheet_name}' -- pass --due-date MM/DD/YYYY")
-    print(f"Sheet '{sheet_name}': {len(rows)} commission rows, due {due_date:%m/%d/%Y}")
-
-    lk = Lookups()
-    account, klass = lk.account(args.account), lk.klass(args.klass)
-    q_field = ({"DefinitionId": args.q_field_id, "Name": "Q Number/PO #", "Type": "StringType"}
-               if args.q_field_id else find_q_field())
-    if q_field:
-        print(f"Q Number goes in the bill's '{q_field['Name']}' box")
+    try:
+        plan = prepare(args.workbook, args.sheet, args.start_row, args.due_date, args.account, args.klass,
+                       args.q_field_id)
+    except CommissionError as e:
+        raise SystemExit(str(e))
+    rows, due_date, bills, problems, already = (plan["rows"], plan["due_date"], plan["bills"],
+                                                 plan["problems"], plan["already"])
+    print(f"Sheet '{plan['sheet_name']}': {len(rows)} commission rows, due {due_date:%m/%d/%Y}")
+    if plan["q_field"]:
+        print(f"Q Number goes in the bill's '{plan['q_field']['Name']}' box")
     else:
         print("WARNING: couldn't find the 'Q Number/PO #' box on any recent bill in QuickBooks -- "
               "bills will be created without it (fill one in by hand on any bill, then re-run).")
-    bills, problems = plan_bills(rows, lk, due_date, account, klass, q_field)
-    already = existing_bills(b["row"]["doc_number"] for b in bills)
-
     print()
     print(f"{'Row':>4}  {'Bill #':<15} {'Date':<10} {'Vendor':<26} {'Amount':>10}  Customer")
     for b in bills:
         r = b["row"]
         flag = "  (vendor auto-matched)" if b["how"] == "auto" else ""
-        if (r["doc_number"], b["vendor"]["Id"]) in already:
+        if is_already(b, already):
             flag += "  ALREADY IN QBO - skipped"
         print(f"{r['excel_row']:>4}  {r['doc_number']:<15} {r['pay_date']:%m/%d/%y}  "
               f"{b['vendor']['DisplayName'][:26]:<26} {b['amount']:>10,.2f}  {r['customer']}{flag}")
@@ -437,7 +470,7 @@ def main():
         write_export(args.export, bills, due_date, args.account, args.klass)
         print(f"\nWrote {args.export}")
 
-    to_post = [b for b in bills if (b["row"]["doc_number"], b["vendor"]["Id"]) not in already]
+    to_post = [b for b in bills if not is_already(b, already)]
     if not args.post:
         print(f"\nPreview only -- re-run with --post to create {len(to_post)} bill(s).")
         return 1 if problems else 0
@@ -446,13 +479,9 @@ def main():
     for b in to_post:
         r = b["row"]
         try:
-            data = _cf_request("POST", "bill", payload=b["payload"])
-            saved = data["Bill"]
-            note = ""
-            if b["payload"].get("CustomField") and not any(
-                    cf.get("StringValue") == r["q_number"] for cf in saved.get("CustomField") or []):
-                note = "  (WARNING: QuickBooks didn't keep the Q Number)"
-            print(f"Created bill {r['doc_number']} for {b['vendor']['DisplayName']} (Id {saved['Id']}){note}")
+            bill_id, warning = post_bill(b)
+            note = f"  (WARNING: {warning})" if warning else ""
+            print(f"Created bill {r['doc_number']} for {b['vendor']['DisplayName']} (Id {bill_id}){note}")
             created += 1
         except qbo_client.QBOError as e:
             print(f"FAILED row {r['excel_row']} {r['doc_number']}: {e}")
