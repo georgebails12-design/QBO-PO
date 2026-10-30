@@ -85,3 +85,49 @@ export. The one difference: reference data (vendors/items/accounts/
 customers) is refreshed on-demand via a background job polled from the
 page, since QuickBooks paginates at 1000 records/request and this
 company's lists are large (thousands of each).
+
+## Commission bills
+
+`commission_bills.py` turns the payroll commission workbook
+(`Payroll_Com_<date>.xlsx`) into one QuickBooks Bill per row, using the same
+QuickBooks connection as the PO app. Run it from the app folder on the server:
+
+```bash
+venv/bin/pip install -r requirements.txt                       # once, for openpyxl
+venv/bin/python commission_bills.py Payroll_Com_Oct_26th_2026.xlsx           # preview
+venv/bin/python commission_bills.py Payroll_Com_Oct_26th_2026.xlsx --post    # create bills
+```
+
+Each bill: vendor = sales rep (column B), bill date = payment date (I),
+due date = payroll date from the sheet name ("Oct 26") or `--due-date`,
+bill no. = "17506 Final", memo = the line description, Q Number/PO # = column M
+(the custom field is found from existing bills, or pass `--q-field-id`), category `6800 Sales Commissions`, class
+`Operations`, customer = column F, amount = commission (O). Reps are mapped
+to vendors in `commission_vendors.json` (a shared deal like "TE" lists
+each vendor; the "2nd Comm" column is billed to the vendor under the
+`"2nd Comm"` key). Bills that already exist (same
+number and vendor) are skipped, so re-running is safe. `--export file.csv`
+also writes the bills in the QuickBooks import-sheet layout.
+
+### Commission support (scanned backup)
+
+`commission_support.py` checks the scanned commission support PDF against
+the workbook. It flags rows with no support page and invoice numbers in
+the scan that aren't on the sheet, and splits the scan into one PDF per
+invoice. Run it with `--attach` after posting to attach each invoice's PDF
+to its bills (safe to re-run):
+
+```bash
+venv/bin/python commission_support.py Payroll_Com_Nov_9th_2026.xlsx support.pdf            # check
+venv/bin/python commission_support.py Payroll_Com_Nov_9th_2026.xlsx support.pdf --attach   # after posting
+```
+
+### Commission Bills page
+
+`/commissions` (Commission Bills in the menu) does the same steps from the browser:
+1. Upload the commission workbook and the scanned support, and enter the payroll date and the first row of this payroll.
+2. **Check** shows the bills, totals by vendor, rows that can't be billed, and missing or extra support.
+3. **Post bills** creates them. Bills already in QuickBooks are skipped, so it's safe to click twice.
+4. **Attach support** adds each invoice's scanned pages to all of its bills.
+
+Each run is kept in `downloads/commissions/<id>/` (gitignored, excluded from deploys). Reopen a run with `?run=<id>`.

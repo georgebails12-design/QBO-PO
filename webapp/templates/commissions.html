@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Commission Bills{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-title-row">
+    <h2>Commission Bills</h2>
+  </div>
+  <p class="hint">Upload this payroll's commission workbook and the scanned support. The page checks them,
+    then <b>Post</b> creates the bills in QuickBooks and <b>Attach</b> adds each invoice's support pages to its bills.
+    Nothing is created until you click Post.</p>
+  <form id="commission-form" class="field-row">
+    <label class="field">Commission workbook (.xlsx)
+      <input type="file" name="workbook" accept=".xlsx,.xlsm" required>
+    </label>
+    <label class="field">Scanned support (PDF, optional)
+      <input type="file" name="support" accept="application/pdf,.pdf">
+    </label>
+    <label class="field small">Payroll date
+      <input type="date" name="due_date" required>
+    </label>
+    <label class="field small">First row
+      <input type="number" name="start_row" min="2" value="2" title="The row this payroll starts on, when the sheet holds more than one payroll">
+    </label>
+    <div class="field small"><button type="submit" class="btn-primary" id="commission-check-btn">Check</button></div>
+  </form>
+  <p class="status-line" id="commission-status"></p>
+</div>
+
+<div class="card" id="commission-result-card" style="display:none;">
+  <div class="card-title-row">
+    <h2 id="commission-summary-title">Bills</h2>
+    <div class="card-title-actions">
+      <button type="button" class="btn-primary" id="commission-post-btn">Post bills</button>
+      <button type="button" class="btn-secondary" id="commission-attach-btn">Attach support</button>
+    </div>
+  </div>
+  <div id="commission-findings"></div>
+  <table class="grid">
+    <thead><tr><th>Row</th><th>Bill #</th><th>Date</th><th>Vendor</th><th class="amount-cell">Amount</th>
+      <th>Customer / Project</th><th>Q #</th><th>Status</th></tr></thead>
+    <tbody id="commission-bills-body"></tbody>
+  </table>
+  <h2 style="margin-top:18px;">Totals by vendor</h2>
+  <table class="grid" style="max-width:520px;">
+    <thead><tr><th>Vendor</th><th>Bills</th><th class="amount-cell">Amount</th></tr></thead>
+    <tbody id="commission-vendor-body"></tbody>
+  </table>
+  <div id="commission-step-results"></div>
+</div>
+<script src="{{ url_for('static', filename='commissions.js') }}"></script>
+{% endblock %}
