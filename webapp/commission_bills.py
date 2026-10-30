@@ -174,6 +174,9 @@ def load_vendor_map():
     return {norm(k): v for k, v in data.items() if not k.startswith("_")}
 
 
+SECOND_COMM_BY_INVOICE_KEY = "2nd Comm by invoice"  # {"17589": "MACAPINLAC CECILE"}
+
+
 SECOND_COMM_KEY = "2nd Comm"  # commission_vendors.json key for who is paid the "2nd Comm" column
 
 
@@ -324,12 +327,18 @@ def plan_bills(rows, lk, due_date, account, klass, q_field=None):
                   r["description"] if share == 1 or r["rate"] is None
                   else r["description"].rsplit(" ", 1)[0] + " " + fmt_rate(r["rate"] * float(share)))
                  for vendor, share, how in payees]
+        inv = r["doc_number"].split()[0]
+        override = (lk.vendor_map.get(norm(SECOND_COMM_BY_INVOICE_KEY)) or {}).get(inv)
+        row_second_vendor = lk.vendor_by_display(override) if override else second_vendor
+        if override and not row_second_vendor:
+            problems.append((r, f"2nd Comm vendor '{override}' for {inv} not found in QuickBooks"))
+            continue
         if r["second"]:
-            if not second_vendor:
+            if not row_second_vendor:
                 problems.append((r, f"has 2nd Comm {r['second']:,.2f} but no '{SECOND_COMM_KEY}' vendor is set "
                                     "in commission_vendors.json"))
             else:
-                lines.append((second_vendor, r["second"], "map", r["second_description"]))
+                lines.append((row_second_vendor, r["second"], "map", r["second_description"]))
         for vendor, amount, how, description in lines:
             bill = {
                 "row": r, "vendor": vendor, "how": how, "amount": amount, "customer": customer,

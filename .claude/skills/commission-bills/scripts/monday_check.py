@@ -17,6 +17,7 @@ reports:
 With --xlsx the findings are added as a "Monday check" tab to that workbook.
 """
 import argparse
+import difflib
 import json
 import os
 import re
@@ -111,6 +112,8 @@ def q_base(q):
 def same_person(monday_name, vendor_name):
     a = {NICKNAMES.get(t, t) for t in cb.norm(monday_name).split()}
     b = {NICKNAMES.get(t, t) for t in cb.norm(vendor_name).split()}
+    if a and b:  # tolerate small spelling differences, e.g. Davenport / DAVENENPORT
+        a = {next((y for y in b if difflib.SequenceMatcher(None, x, y).ratio() >= 0.8), x) for x in a}
     return bool(a) and (a <= b or b <= a)
 
 
@@ -171,15 +174,16 @@ def compare(mlines, rows, vendor_map, second_vendor):
         mreps = [n for n, _ in m["reps"]]
         missing = [n for n in mreps if not any(same_person(n, v) for v in vendors)]
         extra = [v for v in vendors if not any(same_person(n, v) for n in mreps)]
-        if missing or extra:
+        if mreps and (missing or extra):  # monday with no in-house rep (All Weather, Woodgrain): nothing to compare
             issues.append(f"reps: sheet {r['rep']} ({' + '.join(vendors) or 'unmapped'}) vs monday {' + '.join(mreps) or 'none'}")
         rates = {round(rr, 5) for _, rr in m["reps"] if rr}
         if r["rate"] is not None and rates and round(r["rate"], 5) not in rates:
             issues.append(f"rate: sheet {r['rate'] * 100:g}% vs monday {' / '.join(f'{x * 100:g}%' for x in sorted(rates))}")
         if m["sa"] and not r["second"]:
             issues.append(f"monday has SA {m['sa'][0]} {m['sa'][1] * 100:g}% but sheet has no 2nd Comm")
-        elif m["sa"] and second_vendor and not same_person(m["sa"][0], second_vendor):
-            issues.append(f"2nd Comm goes to {second_vendor} but monday SA is {m['sa'][0]}")
+        elif m["sa"] and (sv := (vendor_map.get(cb.norm(cb.SECOND_COMM_BY_INVOICE_KEY)) or {})
+                          .get(r["doc_number"].split()[0]) or second_vendor) and not same_person(m["sa"][0], sv):
+            issues.append(f"2nd Comm goes to {sv} but monday SA is {m['sa'][0]}")
         elif r["second"] and not m["sa"]:
             issues.append("sheet has 2nd Comm but monday has no sales-assistant %")
         if issues:

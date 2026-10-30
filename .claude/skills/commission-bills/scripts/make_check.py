@@ -41,7 +41,8 @@ for r in rows:
         bills.append((r, name, cb.money(r["amount"] * cb.Decimal(str(share))), x[13] * share, desc,
                       "Commission" if len(vendors) == 1 else f"Shared deal ({r['rep']})"))
     if r["second"]:
-        bills.append((r, vm[cb.norm("2nd Comm")], r["second"], 0.005, r["second_description"], "2nd Comm override"))
+        sv = (vm.get(cb.norm(cb.SECOND_COMM_BY_INVOICE_KEY)) or {}).get(r["doc_number"].split()[0]) or vm[cb.norm("2nd Comm")]
+        bills.append((r, sv, r["second"], 0.005, r["second_description"], "2nd Comm override"))
 
 wb = Workbook(); ws = wb.active; ws.title = "Bills to Post"
 hdr = ["Post?", "Bill Date", "Due Date", "Bill Number", "Transaction Type", "Customer", "Vendor",
@@ -93,7 +94,7 @@ def shares(m):
 extra = sum(float(cb.money(r["amount"] * cb.Decimal(str(sh)))) for r in rows
             for sh in shares(vm[cb.norm(r["rep"])])[1:])
 recon = [("Commission column (O) on source sheet", round(o, 2)),
-         ("2nd Comm column (P) - billed to " + vm[cb.norm("2nd Comm")], round(p, 2)),
+         ("2nd Comm column (P) - sales assistant 0.5%", round(p, 2)),
          ("Shared deals - other reps on the same row", round(extra, 2))]
 base = e + 3
 s.cell(base, 1, "Reconciliation to " + sheet + " sheet").font = Font(bold=True)
