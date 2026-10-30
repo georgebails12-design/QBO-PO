@@ -74,8 +74,12 @@ function renderCheck(check, posted) {
     parts.push('<p class="hint">No support scan uploaded -- Attach is not available for this run.</p>');
   }
   $('commission-findings').innerHTML = parts.join('');
-  $('commission-attach-btn').disabled = !s || !posted;
-  $('commission-post-btn').disabled = !!posted && posted.failed === 0;
+  // Attach works whenever a scan was uploaded -- the bills may have been posted
+  // earlier (another run, or outside this page); attach reports any not posted yet.
+  $('commission-attach-btn').disabled = !s;
+  const allInQbo = check.bills.length > 0 && check.bills.every((b) => b.already);
+  $('commission-post-btn').disabled = allInQbo || (!!posted && posted.failed === 0);
+  $('commission-post-btn').title = allInQbo ? 'Every bill is already in QuickBooks' : '';
 }
 
 function renderSteps(job) {
