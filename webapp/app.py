@@ -15,6 +15,7 @@ login sessions survive a restart; a random one is generated otherwise
 """
 
 import concurrent.futures
+import datetime
 import json
 import os
 import re
@@ -28,6 +29,7 @@ import requests
 from flask import Flask, Response, jsonify, redirect, render_template, request, send_file, session, url_for
 
 import auth
+import bill_adjust
 import cardinal_glass_output
 import commission_bills
 import commission_support
@@ -133,6 +135,12 @@ def categories_page():
 @auth.login_required
 def purchase_orders_page():
     return render_template("view_purchase_orders.html", user=auth.current_user())
+
+
+@app.route("/bill-adjust")
+@auth.login_required
+def bill_adjust_page():
+    return render_template("bill_adjust.html", user=auth.current_user(), today=datetime.date.today().isoformat())
 
 
 @app.route("/commissions")
@@ -802,6 +810,43 @@ def api_commissions_step(job_id, step):
     if not _cjob_start(job_dir, step, fn):
         return err("Something is still running for this upload -- wait for it to finish.", 409)
     return jsonify({"started": step})
+
+
+# ---------------------------------------------------------------------------
+# Bill adjust: re-price open bills to the dollars paid (see bill_adjust.py)
+# ---------------------------------------------------------------------------
+def _bill_adjust_plan(body):
+    return bill_adjust.plan(body.get("vendor"), body.get("numbers") or "",
+                            str(body.get("total") or "").replace(",", "").replace("$", ""),
+                            body.get("pay_date") or None, body.get("mode") or "scale", body.get("account") or None)
+
+
+@app.route("/api/bill-adjust/preview", methods=["POST"])
+@auth.login_required
+def api_bill_adjust_preview():
+    try:
+        return jsonify(bill_adjust.as_json(_bill_adjust_plan(request.get_json(force=True) or {})))
+    except (bill_adjust.AdjustError, qbo_client.QBOError) as e:
+        return err(e)
+
+
+@app.route("/api/bill-adjust/apply", methods=["POST"])
+@auth.login_required
+def api_bill_adjust_apply():
+    body = request.get_json(force=True) or {}
+    try:
+        p = _bill_adjust_plan(body)
+        expected = {str(k): round(float(v), 2) for k, v in (body.get("expected") or {}).items()}
+        now = {r["doc"]: round(float(r["new"]), 2) for r in p["bills"]}
+        if not expected or expected != now:
+            return err("The bills changed since the preview. Click Preview again and check the amounts.", 409)
+        results = bill_adjust.apply(p)
+    except (bill_adjust.AdjustError, qbo_client.QBOError) as e:
+        return err(e)
+    for r in results:
+        if "total" in r:
+            r["total"] = float(r["total"])
+    return jsonify({"plan": bill_adjust.as_json(p), "results": results})
 
 
 if __name__ == "__main__":

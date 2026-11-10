@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Adjust Bills{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-title-row">
+    <h2>Adjust Bills to Amount Paid</h2>
+  </div>
+  <p class="hint">For bills entered in another currency (e.g. ELVIAL in euros) and paid in dollars. Enter the
+    open bills this payment covers and the dollars paid. The payment is spread over the bills in proportion to
+    their amounts, so after the update they total exactly what you paid. <b>Preview</b> changes nothing;
+    <b>Update bills</b> saves the new amounts in QuickBooks.</p>
+  <form id="adjust-form" class="field-row">
+    <label class="field">Vendor
+      <input type="text" name="vendor" value="ELVIAL" required>
+    </label>
+    <label class="field">Bill numbers (full or just the ending)
+      <input type="text" name="numbers" placeholder="00125, 06306, 04502, 04501" required>
+    </label>
+    <label class="field small">Dollars paid
+      <input type="text" name="total" inputmode="decimal" placeholder="73341.31" required>
+    </label>
+    <label class="field small">Payment date
+      <input type="date" name="pay_date" value="{{ today }}" required>
+    </label>
+    <label class="field small">How
+      <select name="mode" id="adjust-mode">
+        <option value="scale">Scale every line</option>
+        <option value="line">Add one adjustment line</option>
+      </select>
+    </label>
+    <label class="field" id="adjust-account-field" style="display:none;">Account for the adjustment line
+      <input type="text" name="account" placeholder="e.g. Exchange Gain or Loss">
+    </label>
+    <div class="field small"><button type="submit" class="btn-primary">Preview</button></div>
+  </form>
+  <p class="status-line" id="adjust-status"></p>
+</div>
+
+<div class="card" id="adjust-result-card" style="display:none;">
+  <div class="card-title-row">
+    <h2 id="adjust-title">Bills</h2>
+    <div class="card-title-actions">
+      <button type="button" class="btn-primary" id="adjust-apply-btn">Update bills</button>
+    </div>
+  </div>
+  <table class="grid">
+    <thead><tr><th>Bill #</th><th>Date</th><th>Due</th><th class="amount-cell">Now</th>
+      <th class="amount-cell">New</th><th class="amount-cell">Change</th><th>Status</th></tr></thead>
+    <tbody id="adjust-body"></tbody>
+  </table>
+</div>
+<script src="{{ url_for('static', filename='bill_adjust.js') }}"></script>
+{% endblock %}
