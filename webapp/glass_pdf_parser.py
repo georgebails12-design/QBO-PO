@@ -155,6 +155,9 @@ def fix_fraction(raw, flags=None, label=""):
             return t
     if not n:
         return whole
+    if d not in FRACTION_DENOMINATORS and flags is not None:
+        flags.append(f'{label} "{t}" -- /{d} isn\'t a tape-measure fraction; check against the paper '
+                     f'(probably a typo on the sheet)')
     k = math.gcd(n, d)
     out = (f"{whole} " if whole != "0" else "") + f"{n // k}/{d // k}"
     if k > 1 and flags is not None:
@@ -190,7 +193,7 @@ def clean_makeup(breakdown):
     s = re.sub(r'"(?=[A-Za-z])', '" ', s)
     s = re.sub(r"\s*\+\s*", " + ", s)
     # Stray punctuation from marks next to the last word (mostly on scans).
-    s = re.sub(r"[\s.,;:'`~»«“”]+$", "", s)
+    s = re.sub(r"[\s.,;:'`~»«“”|\[\]]+$", "", s)
     return norm(s)
 
 
@@ -228,6 +231,10 @@ def parse_sheet(lines):
             if m:
                 project = m.group(1)
                 job_name = norm(row.text[:m.start()])
+            elif re.match(r"^[A-Z ]+:", row.text):
+                # Scans: the value row can be missing entirely, leaving the
+                # next label ("UNIT TYPE:") here -- don't take that as the job.
+                project = job_name = jdm = ""
 
     sheet = {
         "project": project, "job_name": job_name, "jdm": jdm,
@@ -283,12 +290,20 @@ def parse_sheet(lines):
             oa = fix_fraction(oa.rstrip('"'), flags, "OA") + '"'
 
         w = h = ""
-        d = re.search(r'OVERALL DIM\.?:\s*([\d\s/]+?)\s*("?)\s*[xX×]\s*([\d\s/]+?)\s*"', flat)
+        d = re.search(r'OVERALL DIM\.?:\s*([\d\s/]+?)\s*("?)\s*([xX×])\s*([\d\s/]+?)\s*("|(?=-\s*OA\b))', flat)
+        if not d:
+            # 'OVERALL DIM.: 31 5/16" 48 3/8"' -- the "X" was left off the sheet.
+            d = re.search(r'OVERALL DIM\.?:\s*([\d\s/]+?)\s*(")\s*()(\d[\d\s/]*?)\s*("|(?=-\s*OA\b))', flat)
         if d:
             w = fix_fraction(d.group(1), flags, "Width")
-            h = fix_fraction(d.group(3), flags, "Height")
+            h = fix_fraction(d.group(4), flags, "Height")
             if not d.group(2):
                 flags.append(f"Sheet is missing the inch mark after the width ({norm(d.group(1))})")
+            if not d.group(3):
+                flags.append(f'Sheet is missing the "X" between width and height ({norm(d.group(1))}" {norm(d.group(4))}") '
+                             f'-- check which is which against the paper')
+            if not d.group(5):
+                flags.append(f"Sheet is missing the inch mark after the height ({norm(d.group(4))})")
         elif re.search(r"OVERALL DIM\.?:\s*SHAPED", flat, re.IGNORECASE):
             flags.append("Shaped glass -- no overall size on the sheet; take it from the shop drawing details "
                          "and fix the item name before creating it")
@@ -351,11 +366,15 @@ def resolve_lite(text, mapping):
     base_key = re.sub(r"\s*#\d+$", "", key).strip()
     if base_key in mapping:
         return mapping[base_key], None
+    # Scans: the small "i" in "i89" comes out as 1, |, l, ! or i3.
+    ocr_key = re.sub(r"^[I1L|!\[\]]{1,2}3?(?=89\b)", "I", base_key)
+    if ocr_key != base_key and ocr_key in mapping:
+        return mapping[ocr_key], f"read as '{text.strip()}' on the scan -- taken as {ocr_key}; verify"
     return None, f"code not mapped for '{text.strip()}'"
 
 
 PLY_RE = re.compile(r'^(?P<thk>\d+/\d+)"\s*(?P<lite>.+)$')
-SPACER_RE = re.compile(r'^(?P<size>\d+/\d+)"\s*(?P<color>[A-Z]+)\s+(?:ALUMINUM\s+)?SPACER\b(?P<rest>.*)$', re.IGNORECASE)
+SPACER_RE = re.compile(r'^(?P<size>\d+/\d+)"\s*(?P<color>[A-Z]+)\s+(?:ALUMINUM\s+)?(?P<word>SPACER?)\b(?P<rest>.*)$', re.IGNORECASE)
 SHADOW_RE = re.compile(r"SHADOW BARS\s*\(\s*(?:M[- ]?CODE)?[\s:-]*([^)]+?)\s*\)", re.IGNORECASE)
 BUMP_RE = re.compile(r"BUMP ON\s*(?:\(([^)]+)\)|(\w+))", re.IGNORECASE)
 
@@ -381,6 +400,8 @@ def parse_spec(spec):
         return None, ["glass makeup did not match the expected pattern - THK/LITE/SPC columns left blank, verify manually"]
 
     flags = []
+    if sp.group("word").upper() == "SPACE":
+        flags.append('Sheet says "SPACE" instead of "SPACER" -- read as a spacer, verify')
     lite1_text = p1.group("lite")
     lite2_text = p2.group("lite")
 
@@ -427,9 +448,19 @@ def parse_spec(spec):
 # ---------------------------------------------------------------------------
 # Item name / description
 # ---------------------------------------------------------------------------
+def display_unit(unit):
+    """Unit number as written on the PO: '001.0' -> '1', '001.2' -> '1.2',
+    '007' -> '7'. Anything else (e.g. '5.A1,C1', '17.1,3') is left as-is."""
+    m = re.fullmatch(r"0*(\d+)(?:\.(\d+))?", unit or "")
+    if not m:
+        return unit
+    base, sub = m.groups()
+    return base if not sub or int(sub) == 0 else f"{base}.{sub}"
+
+
 def item_name(job, unit, w, h):
     size = f'{w}" x {h}"' if w and h else "SHAPED GLASS - SIZE?"
-    return f'{size} (Job# {job} Unit# {unit})'
+    return f'{size} (Job# {job} Unit# {display_unit(unit)})'
 
 
 def description(makeup, order_line, oa, include_order_line=True):
@@ -446,7 +477,7 @@ def build_result(sheet):
     for u in sheet["units"]:
         _parsed, spec_flags = parse_spec(u["makeup"])
         units.append({
-            "unit": u["unit"],
+            "unit": display_unit(u["unit"]),
             "qty": u["qty"],
             "dim": u["dim"],
             "oa": u["oa"],
@@ -500,11 +531,11 @@ def parse_glass_pdf(path):
     Raises ValueError if no UNIT# blocks are found (wrong kind of PDF).
     """
     scanned = is_scanned(path)
-    rapid_pages = None
+    rapid_pages = tess_header = None
     if scanned:
         import glass_ocr
         try:
-            lines, rapid_pages = glass_ocr.read_scanned_pdf(path)
+            lines, rapid_pages, tess_header = glass_ocr.read_scanned_pdf(path)
         except glass_ocr.OCRUnavailable as exc:
             raise ValueError(f"This PDF is a scan, and scan reading isn't set up on the server: {exc}")
     else:
@@ -520,18 +551,30 @@ def parse_glass_pdf(path):
         raise ValueError("No UNIT# blocks could be read from this PDF. Send it over so the parser can be updated.")
     if scanned:
         import glass_ocr
-        header = glass_ocr.header_from_rapid(rapid_pages)
-        if header["project"] and not re.fullmatch(r"\d{4,}", sheet["project"] or ""):
-            sheet["project"] = header["project"]
-            sheet["job_name"] = header["job_name"] or sheet["job_name"]
-            sheet["jdm"] = header["jdm"] or sheet["jdm"]
-        elif header["project"] and header["project"] != sheet["project"]:
-            sheet["flags"].append(f"Project # unclear on the scan (read as {sheet['project']} and "
-                                  f"{header['project']}) -- check it against the paper")
+        # The boxed header row is the part Tesseract most often loses when it
+        # reads the whole page, so it's also read on its own (tess_header) and
+        # by the second reader if installed. First good reading wins; any
+        # disagreement is flagged.
+        for header in (tess_header or {}, glass_ocr.header_from_rapid(rapid_pages)):
+            if not header.get("project"):
+                continue
+            if not re.fullmatch(r"\d{4,}", sheet["project"] or ""):
+                sheet["project"] = header["project"]
+                sheet["job_name"] = header["job_name"] or sheet["job_name"]
+                sheet["jdm"] = header["jdm"] or sheet["jdm"]
+            elif header["project"] != sheet["project"]:
+                sheet["flags"].append(f"Project # unclear on the scan (read as {sheet['project']} and "
+                                      f"{header['project']}) -- check it against the paper")
         if not re.fullmatch(r"\d{4,}", sheet["project"] or ""):
             sheet["flags"].append("Couldn't read the project # from the scan -- fix the Job# in each item name")
+        sheet["jdm"] = re.sub(r"^[^A-Za-z0-9]+|[^A-Za-z0-9]+$", "", sheet["jdm"] or "")
         glass_ocr.cross_check_units(sheet["units"], rapid_pages, sheet["flags"])
         for u in sheet["units"]:
+            # The small "i" of "i89" often comes out as 1, |, l or "i3" on scans.
+            fixed = re.sub(r'(?<=")(\s*)[1lI|!\[\]]{1,2}3?89\b|(?<=")(\s*)i389\b', r"\1\2i89", u["makeup"])
+            if fixed != u["makeup"]:
+                u["flags"].append('Glass type read as something like "189" on the scan -- taken as i89; verify')
+                u["makeup"] = fixed
             u["flags"].insert(0, glass_ocr.SCAN_FLAG)
     result = build_result(sheet)
     result["scanned"] = scanned

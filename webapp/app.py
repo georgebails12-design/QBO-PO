@@ -436,7 +436,9 @@ def api_cardinal_csv():
         spacer_types_seen.append(getattr(item, "spc_type_parsed", None))
 
     if not line_items:
-        return jsonify({"error": "None of the units could be turned into a Cardinal line item.", "skipped": skipped}), 400
+        detail = "; ".join(f"Unit# {s['unit']}: {(s['reasons'] or ['no reason given'])[-1]}" for s in skipped)
+        return jsonify({"error": f"None of the units could be turned into a Cardinal line item. {detail}",
+                        "skipped": skipped}), 400
 
     spacer_type = next((s for s in spacer_types_seen if s), "BLACK SS")
 
