@@ -131,3 +131,28 @@ venv/bin/python commission_support.py Payroll_Com_Nov_9th_2026.xlsx support.pdf 
 4. **Attach support** adds each invoice's scanned pages to all of its bills.
 
 Each run is kept in `downloads/commissions/<id>/` (gitignored, excluded from deploys). Reopen a run with `?run=<id>`.
+
+## Adjust Bills (pay foreign-currency bills in dollars)
+
+Bills entered at a foreign-currency amount (e.g. ELVIAL invoices in euros) and paid
+with one USD wire won't match the payment. `bill_adjust.py` re-prices the bills so
+they add up to exactly the dollars paid. The payment is spread over the bills in
+proportion to their amounts (one rate for the whole payment):
+
+```bash
+venv/bin/python bill_adjust.py ELVIAL 00125 06306 04502 04501 --total 73341.31            # preview
+venv/bin/python bill_adjust.py ELVIAL 00125 06306 04502 04501 --total 73341.31 --apply    # update
+```
+
+- Bill numbers can be the full number (`INV-K-06306`) or just the ending (`06306`).
+- `--mode scale` (default) multiplies every line by the rate, so item and job costs
+  carry the real USD cost. `--mode line --account "<account>"` instead keeps the
+  lines and adds one "Exchange difference" line per bill.
+- Only fully unpaid, home-currency bills are changed. Part-paid bills are refused,
+  and so are bills in a multicurrency foreign currency, which should be paid at the
+  day's exchange rate instead.
+- Each bill's memo records the original amount, rate and date. Re-running with the
+  same total does nothing.
+
+The **Adjust Bills** page (`/bill-adjust`) does the same from the browser: Preview,
+then Update bills. After that, pay the bills in QuickBooks with the wire as usual.
