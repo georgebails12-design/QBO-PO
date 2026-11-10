@@ -125,18 +125,77 @@ def _rapid_boxes(img):
     return boxes
 
 
+HEADER_LABEL_RE = re.compile(r"PROJECT\s*NAME", re.IGNORECASE)
+
+
+def _strip_table_lines(img):
+    """White out the box lines around the header cells -- with them in,
+    Tesseract often drops the whole row of values (seen on job 92172)."""
+    a = np.asarray(img).copy()
+    dark = a < 128
+    a[dark.mean(axis=1) > 0.5, :] = 255
+    a[:, dark.mean(axis=0) > 0.6] = 255
+    return Image.fromarray(a)
+
+
+def header_from_tesseract(img, page_lines):
+    """{"project", "job_name", "jdm"} read from the row of boxed cells under
+    "PROJECT NAME: / JDM: / PROJECT#:" on page 1, by cropping that row out
+    and reading it on its own. Values are assigned to columns by where the
+    JDM / PROJECT# labels sit."""
+    empty = {"project": "", "job_name": "", "jdm": ""}
+    label = next((ln for ln in page_lines if HEADER_LABEL_RE.search(ln.text)), None)
+    if label is None:
+        return empty
+    top = label.y / PT_PER_PX + 2
+    nxt = next((ln for ln in page_lines if ln.y > label.y + 4), None)
+    bottom = top + 0.75 * (nxt.y - label.y) / PT_PER_PX if nxt else top + 100
+    bottom = min(bottom, top + 160)
+    crop = _strip_table_lines(img.crop((0, int(top), img.width, int(bottom))))
+    try:
+        import pytesseract
+        data = pytesseract.image_to_data(crop, config="--psm 6", output_type=pytesseract.Output.DICT)
+    except Exception:
+        return empty
+    # (center x, text) -- by center, since a stray bit of box line glued to
+    # the front of a word ("|_JSDCA") can start it left of its column.
+    words = []
+    for i, raw in enumerate(data["text"]):
+        text = re.sub(r"^[^A-Za-z0-9]+|[^A-Za-z0-9]+$", "", raw)
+        if text:
+            words.append(((data["left"][i] + data["width"][i] / 2) * PT_PER_PX, text))
+    words.sort(key=lambda t: t[0])
+    if not words:
+        return empty
+
+    jdm_x = next((w[0] for w in label.words if re.match(r"JDM", w[2], re.IGNORECASE)), None)
+    proj_x = next((w[0] for w in reversed(label.words)
+                   if re.match(r"PROJECT", w[2], re.IGNORECASE) and (jdm_x is None or w[0] > jdm_x)), None)
+    if jdm_x is None or proj_x is None:
+        m = re.search(r"(\d{4,})\s*$", " ".join(w[1] for w in words))
+        return {"project": m.group(1) if m else "", "job_name": "", "jdm": ""}
+    slack = 6  # points; a value can start a little left of its label
+    name = " ".join(t for x, t in words if x < jdm_x - slack)
+    jdm = " ".join(t for x, t in words if jdm_x - slack <= x < proj_x - slack)
+    proj = "".join(t for x, t in words if x >= proj_x - slack).replace("O", "0")
+    return {"project": proj if re.fullmatch(r"\d{4,}", proj) else "", "job_name": name, "jdm": jdm}
+
+
 def read_scanned_pdf(path):
-    """Returns (lines, rapid_boxes_per_page). rapid_boxes_per_page is None
-    when the second reader isn't installed."""
-    lines, rapid_pages = [], []
+    """Returns (lines, rapid_boxes_per_page, tesseract_header).
+    rapid_boxes_per_page is None when the second reader isn't installed."""
+    lines, rapid_pages, header = [], [], None
     with pdfplumber.open(path) as pdf:
         for page_no, page in enumerate(pdf.pages, start=1):
             img = remove_colored_ink(page.to_image(resolution=DPI).original)
-            lines.extend(_tesseract_lines(img, page_no))
+            page_lines = _tesseract_lines(img, page_no)
+            lines.extend(page_lines)
+            if header is None:
+                header = header_from_tesseract(img, page_lines)
             rapid_pages.append(_rapid_boxes(img))
     if all(p is None for p in rapid_pages):
         rapid_pages = None
-    return lines, rapid_pages
+    return lines, rapid_pages, header or {"project": "", "job_name": "", "jdm": ""}
 
 
 # ---------------------------------------------------------------------------

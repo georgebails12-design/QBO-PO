@@ -295,6 +295,10 @@ def line_item_from_parsed_unit(unit: dict) -> Tuple[Optional["LineItem"], List[s
     if not m:
         return None, flags + [f'Could not split "{unit["dim"]}" into width x height.']
     width_str, height_str = f'{m.group(1).rstrip(chr(34))}"', f'{m.group(2).rstrip(chr(34))}"'
+    for label, dim in (("Width", width_str), ("Height", height_str)):
+        frac = re.search(r"/(\d+)", dim)
+        if frac and int(frac.group(1)) not in _gpp.FRACTION_DENOMINATORS:
+            return None, flags + [f'{label} {dim} isn\'t a real tape-measure size -- fix it from the paper first.']
 
     try:
         item = LineItem(
