@@ -12,7 +12,7 @@ const run = (period, reg) => {
 const out = {};
 for (const rate of [null, 0.0415]) {
   const reg = seed.map(r => (rate && r.lease_id === 'LAGUNA' && r.segment === 2 ? { ...r, status: 'active', annual_rate: rate } : r));
-  for (const p of ['2026-06', '2026-07', '2026-08', '2026-09']) {
+  for (const p of ['2026-06', '2026-07', '2026-08', '2026-09', '2026-10']) {
     const o = run(p, reg);
     out[(rate ? 'laguna' : 'base') + '|' + p] = { target: o.target, leases: o.leases.map(l => ({ name: l.name, pay: l.pay, int: l.int, exp: l.exp, red: l.red, adj: l.adj, L: l.L, R: l.R, G: l.G, cur: l.cur })) };
   }
