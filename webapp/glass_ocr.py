@@ -27,7 +27,16 @@ Needs the tesseract binary on the server (apt-get install tesseract-ocr)
 and the pytesseract / rapidocr_onnxruntime packages from requirements.txt.
 """
 
+import logging
+import os
 import re
+import time
+
+# Tesseract starts one OpenMP thread per core for every page it reads. On a
+# small VPS, with other gunicorn workers busy, those threads fight each other
+# and a few-second page can take minutes. One thread per call is as fast here
+# and never thrashes. (Set before pytesseract runs tesseract as a subprocess.)
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 
 import numpy as np
 import pdfplumber
@@ -38,6 +47,10 @@ from glass_pdf_parser import Line
 DPI = 300
 PT_PER_PX = 72 / DPI
 INK_SATURATION = 40      # max(R,G,B) - min(R,G,B) above this = colored ink, removed
+RAPID_SCALE = 0.5        # second reader runs at 150 dpi: ~2.5x faster, same readings on job 92172
+RAPID_BUDGET_SECONDS = 60  # past this much total OCR time, skip the second reader on the remaining pages
+
+log = logging.getLogger(__name__)
 
 SCAN_FLAG = "Read from a scanned copy -- check size, qty and OA against the paper before creating items"
 
@@ -57,7 +70,12 @@ def _rapid_engine():
         except ImportError:
             _rapid = False
         else:
-            _rapid = RapidOCR()
+            try:
+                # Newer RapidOCR versions take these; cap onnxruntime's threads
+                # for the same reason as OMP_THREAD_LIMIT above.
+                _rapid = RapidOCR(intra_op_num_threads=1, inter_op_num_threads=1)
+            except TypeError:
+                _rapid = RapidOCR()
     return _rapid or None
 
 
@@ -115,11 +133,12 @@ def _rapid_boxes(img):
     eng = _rapid_engine()
     if not eng:
         return None
-    res, _ = eng(np.asarray(img.convert("RGB")))
+    small = img.resize((int(img.width * RAPID_SCALE), int(img.height * RAPID_SCALE)))
+    res, _ = eng(np.asarray(small.convert("RGB")))
     boxes = []
     for box, text, _conf in res or []:
-        xs = [p[0] for p in box]
-        ys = [p[1] for p in box]
+        xs = [p[0] / RAPID_SCALE for p in box]
+        ys = [p[1] / RAPID_SCALE for p in box]
         boxes.append({"x0": min(xs), "x1": max(xs), "y0": min(ys), "y1": max(ys), "text": text})
     boxes.sort(key=lambda b: (b["y0"], b["x0"]))
     return boxes
@@ -185,14 +204,23 @@ def read_scanned_pdf(path):
     """Returns (lines, rapid_boxes_per_page, tesseract_header).
     rapid_boxes_per_page is None when the second reader isn't installed."""
     lines, rapid_pages, header = [], [], None
+    start = time.monotonic()
     with pdfplumber.open(path) as pdf:
         for page_no, page in enumerate(pdf.pages, start=1):
+            t0 = time.monotonic()
             img = remove_colored_ink(page.to_image(resolution=DPI).original)
             page_lines = _tesseract_lines(img, page_no)
             lines.extend(page_lines)
             if header is None:
                 header = header_from_tesseract(img, page_lines)
-            rapid_pages.append(_rapid_boxes(img))
+            t1 = time.monotonic()
+            if t1 - start < RAPID_BUDGET_SECONDS:
+                rapid_pages.append(_rapid_boxes(img))
+            else:
+                rapid_pages.append(None)
+            log.warning("glass scan page %d/%d: tesseract %.1fs, second reader %s",
+                        page_no, len(pdf.pages), t1 - t0,
+                        f"{time.monotonic() - t1:.1f}s" if rapid_pages[-1] is not None else "skipped")
     if all(p is None for p in rapid_pages):
         rapid_pages = None
     return lines, rapid_pages, header or {"project": "", "job_name": "", "jdm": ""}
