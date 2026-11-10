@@ -263,8 +263,9 @@ def plan(vendor_name, numbers, total, pay_date=None, mode="scale", account=None)
             "number": want, "id": b["Id"], "doc": b.get("DocNumber"), "date": b.get("TxnDate"),
             "due": b.get("DueDate"), "old": before, "new": after, "diff": after - before,
             "changes": changes, "unchanged": before == after,
+            # QuickBooks requires VendorRef even on a sparse bill update.
             "payload": {"Id": b["Id"], "SyncToken": b["SyncToken"], "sparse": True,
-                        "Line": lines, "PrivateNote": memo[:4000]},
+                        "VendorRef": b["VendorRef"], "Line": lines, "PrivateNote": memo[:4000]},
         })
     return {"vendor": {"id": vendor["Id"], "name": vendor["DisplayName"]}, "pay_date": pay_date,
             "mode": mode, "account": (acct or {}).get("FullyQualifiedName"),
