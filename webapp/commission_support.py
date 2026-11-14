@@ -161,6 +161,73 @@ def q_numbers_for(rows):
     return out
 
 
+RECEIPT_DATE = re.compile(r"\bDate\s*[:.]?\s*(\d{1,2}/\d{1,2}/\d{4})", re.I)
+RECEIPT_TOTAL = re.compile(r"Total\s*[:.]?\s*\$?\s*([\d,]+\.\d{2})", re.I)
+RECEIPT_REF = re.compile(r"Reference\s*No\.?\s*[:.]?\s*(\d{5,})", re.I)
+
+
+def read_receipt(text):
+    """Payment date, amount and Q# (Reference No) from a QuickBooks payment receipt page."""
+    date = RECEIPT_DATE.search(text)
+    total = RECEIPT_TOTAL.search(text)
+    ref = RECEIPT_REF.search(text)
+    return {"paid_date": date.group(1) if date else "",
+            "paid": float(total.group(1).replace(",", "")) if total else None,
+            "q": q_base(ref.group(1)) if ref else ""}
+
+
+def suggest_bills(extra, pages, sheet_q=None):
+    """For invoice numbers found in the scan but not on the sheet, suggest the row to add.
+
+    Reads the receipt page(s) for date paid, amount and Q#, looks the invoice up in
+    QuickBooks for its customer/project, and lists commission bills already posted for
+    that invoice (a missing sales-assistant 0.5% shows up as a job billed to the rep only).
+    Returns [{invoice, pages, paid_date, paid, q, customer, invoice_date, invoice_total,
+              billed: [{doc, vendor, amount, due, memo}], hint}]."""
+    if not extra:
+        return []
+    text_of = {n: t for n, t, _ in pages}
+    nums = sorted(extra)
+    in_list = ", ".join(f"'{n}'" for n in nums)
+    invoices = {i["DocNumber"]: i for i in qbo_client._query(
+        f"SELECT Id, DocNumber, TxnDate, TotalAmt, CustomerRef FROM Invoice WHERE DocNumber IN ({in_list})")}
+    docs = ", ".join(f"'{n} {s}'" for n in nums for s in ("Final", "Deposit"))
+    billed = {}
+    for b in qbo_client._query(
+            f"SELECT Id, DocNumber, VendorRef, TotalAmt, DueDate, PrivateNote FROM Bill WHERE DocNumber IN ({docs})"):
+        billed.setdefault(b["DocNumber"].split()[0], []).append({
+            "doc": b["DocNumber"], "vendor": (b.get("VendorRef") or {}).get("name", ""),
+            "amount": b.get("TotalAmt"), "due": b.get("DueDate", ""), "memo": b.get("PrivateNote", "")})
+    out = []
+    for n in nums:
+        receipt = {}
+        for p in extra[n]:
+            for k, v in read_receipt(text_of.get(p, "")).items():
+                if v and not receipt.get(k):
+                    receipt[k] = v
+        inv = invoices.get(n) or {}
+        prior = billed.get(n, [])
+        customer = (inv.get("CustomerRef") or {}).get("name", "")
+        same_job = [i for i in (sheet_q or {}).get(receipt.get("q", ""), []) if i != n]
+        if same_job:
+            hint = (f"Same job (Q# {receipt['q']}) as sheet row {', '.join(same_job)} -- the sheet's invoice # "
+                    f"is probably mistyped; change it to {n} and this backup will match.")
+        elif prior:
+            who = "; ".join(f"{b['vendor']} ${b['amount']:,.2f} ({b['doc']}, due {b['due']})" for b in prior)
+            hint = (f"Already billed: {who}. If this backup is for another split (e.g. a sales "
+                    f"assistant's 0.5%), add a row for that person; otherwise it is already paid.")
+        elif inv:
+            hint = ("Not billed yet: add a row for this invoice (rep, Final/Deposit, Panda #, %) "
+                    "so it is billed and gets this backup.")
+        else:
+            hint = "Invoice not found in QuickBooks -- check the number on the receipt."
+        out.append({"invoice": n, "pages": extra[n], "paid_date": receipt.get("paid_date", ""),
+                    "paid": receipt.get("paid"), "q": receipt.get("q", ""), "customer": customer,
+                    "invoice_date": inv.get("TxnDate", ""), "invoice_total": inv.get("TotalAmt"),
+                    "billed": prior, "hint": hint})
+    return out
+
+
 def split_pdf(path, groups, out_dir):
     """Write one PDF per invoice; returns {invoice: file path}."""
     os.makedirs(out_dir, exist_ok=True)
@@ -251,8 +318,18 @@ def main():
             print(f"  {r['doc_number']:<15} {r['rep']:<8} {r['amount']:>10,.2f}  {r['customer']}")
     if extra:
         print("\nIN THE SCAN BUT NOT ON THE SHEET (possible missing commission rows):")
-        for n, p in sorted(extra.items()):
-            print(f"  {n}  page(s) {', '.join(map(str, p))}")
+        try:
+            suggestions = suggest_bills(extra, pages, q_numbers_for(rows))
+        except qbo_client.QBOError as e:
+            suggestions = []
+            print(f"  (couldn't look these up in QuickBooks: {e})")
+        for sg in suggestions or [{"invoice": n, "pages": p} for n, p in sorted(extra.items())]:
+            print(f"  {sg['invoice']}  page(s) {', '.join(map(str, sg['pages']))}")
+            if sg.get("hint"):
+                paid = f"${sg['paid']:,.2f}" if sg.get("paid") else "?"
+                print(f"      {sg.get('customer') or '?'}  Q# {sg.get('q') or '?'}  "
+                      f"paid {paid} on {sg.get('paid_date') or '?'}")
+                print(f"      {sg['hint']}")
     if notes:
         print("\nPages to look at:")
         for n in notes:

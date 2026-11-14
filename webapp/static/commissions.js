@@ -63,8 +63,14 @@ function renderCheck(check, posted) {
         `${escapeHtml(m.doc)} -- ${escapeHtml(m.rep)} $${money(m.amount)} ${escapeHtml(m.customer)}`)));
     }
     if (s.extra.length) {
-      parts.push('<p><b>In the scan but not on the sheet</b> (possible missing commission):</p>' + list(s.extra.map((e) =>
-        `${escapeHtml(e.number)} -- page(s) ${e.pages.join(', ')}`)));
+      const sug = (s.suggestions && s.suggestions.length) ? s.suggestions
+        : s.extra.map((e) => ({ invoice: e.number, pages: e.pages }));
+      parts.push('<p><b>In the scan but not on the sheet</b> -- suggested bills:</p>' + list(sug.map((g) => {
+        const facts = [g.customer, g.q ? `Q# ${g.q}` : '', g.paid ? `paid $${money(g.paid)}` : '',
+          g.paid_date ? `on ${g.paid_date}` : ''].filter(Boolean).map(escapeHtml).join(', ');
+        return `<b>${escapeHtml(g.invoice)}</b> (page ${g.pages.join(', ')})${facts ? ': ' + facts : ''}`
+          + (g.hint ? `<br><span class="hint">${escapeHtml(g.hint)}</span>` : '');
+      })));
     }
     if (s.notes.length) parts.push('<p><b>Pages to look at:</b></p>' + list(s.notes.map(escapeHtml)));
     if (!s.missing.length && !s.extra.length && !s.notes.length) {

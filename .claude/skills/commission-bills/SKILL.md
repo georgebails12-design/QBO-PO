@@ -99,6 +99,13 @@ Extra bills:
    - **Pages to look at:** a page with no invoice number is kept with the
      page before it.
 
+   For each invoice in the scan but not on the sheet, the check suggests the bill.
+   It reads the receipt (date paid, amount, Q#), looks up the invoice's
+   customer/project in QuickBooks, and lists any commission bills already
+   posted for it, e.g. "Already billed: MCCALL DERRICK", which means only a
+   split such as a sales assistant's 0.5% is missing. When a sheet row has the
+   same Q#, it says that row's invoice # is probably mistyped.
+
    It then writes one PDF per invoice. If OCR isn't available (this cloud
    sandbox has no tesseract), read the scan's pages yourself with the Read
    tool and make the same comparison. Put both lists in the report to the
