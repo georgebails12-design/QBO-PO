@@ -34,6 +34,7 @@ import cardinal_glass_output
 import commission_bills
 import commission_support
 import glass_pdf_parser
+import order_ack
 import qbo_client
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -141,6 +142,12 @@ def purchase_orders_page():
 @auth.login_required
 def bill_adjust_page():
     return render_template("bill_adjust.html", user=auth.current_user(), today=datetime.date.today().isoformat())
+
+
+@app.route("/order-ack")
+@auth.login_required
+def order_ack_page():
+    return render_template("order_ack.html", user=auth.current_user())
 
 
 @app.route("/commissions")
@@ -848,6 +855,67 @@ def api_bill_adjust_apply():
         if "total" in r:
             r["total"] = float(r["total"])
     return jsonify({"plan": bill_adjust.as_json(p), "results": results})
+
+
+# ---------------------------------------------------------------------------
+# Cardinal order acknowledgement -> PO cost and date (see order_ack.py).
+# The uploaded PDF is kept in downloads/order_ack/<id>.pdf so Apply re-reads
+# the same file and re-plans against the PO as it is now.
+# ---------------------------------------------------------------------------
+ORDER_ACK_DIR = os.path.join(DOWNLOAD_DIR, "order_ack")
+
+
+def _order_ack_path(ack_id):
+    if not re.fullmatch(r"[0-9a-f]{32}", ack_id or ""):
+        return None
+    path = os.path.join(ORDER_ACK_DIR, ack_id + ".pdf")
+    return path if os.path.exists(path) else None
+
+
+@app.route("/api/order-ack/preview", methods=["POST"])
+@auth.login_required
+def api_order_ack_preview():
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return err("Choose the acknowledgement PDF.")
+    data = file.read()
+    if not data.startswith(b"%PDF"):
+        return err("The acknowledgement must be a PDF.")
+    if len(data) > MAX_UPLOAD_BYTES:
+        return err("That PDF is too large (50MB limit).")
+    os.makedirs(ORDER_ACK_DIR, exist_ok=True)
+    ack_id = uuid.uuid4().hex
+    path = os.path.join(ORDER_ACK_DIR, ack_id + ".pdf")
+    with open(path, "wb") as out:
+        out.write(data)
+    try:
+        p = order_ack.plan(order_ack.parse_pdf(path), request.form.get("date_field") or "due")
+    except (order_ack.AckError, qbo_client.QBOError) as e:
+        return err(e)
+    return jsonify({"id": ack_id, "plan": order_ack.as_json(p), "expected": order_ack.expected_totals(p)})
+
+
+@app.route("/api/order-ack/apply", methods=["POST"])
+@auth.login_required
+def api_order_ack_apply():
+    body = request.get_json(force=True) or {}
+    path = _order_ack_path(body.get("id"))
+    if not path:
+        return err("That upload is gone -- choose the PDF and click Check again.", 404)
+    try:
+        p = order_ack.plan(order_ack.parse_pdf(path), body.get("date_field") or "due")
+        expected = {str(k): round(float(v), 2) for k, v in (body.get("expected") or {}).items()}
+        if not expected or expected != order_ack.expected_totals(p):
+            return err("The PO changed since the check. Click Check again and look it over.", 409)
+        with open(path, "rb") as f:
+            pdf_bytes = f.read() if body.get("attach") else None
+        results = order_ack.apply(p, pdf_bytes)
+    except (order_ack.AckError, qbo_client.QBOError) as e:
+        return err(e)
+    for r in results:
+        if "total" in r:
+            r["total"] = float(r["total"])
+    return jsonify({"plan": order_ack.as_json(p), "results": results})
 
 
 if __name__ == "__main__":

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Glass Acknowledgement{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-title-row">
+    <h2>Cardinal Order Acknowledgement</h2>
+  </div>
+  <p class="hint">Upload the Order Acknowledgement Summary PDF from Cardinal. <b>Check</b> finds the PO by its
+    number, compares every glass size and quantity with the PO's lines, and shows Cardinal's cost on each line.
+    Nothing changes until you click <b>Update PO</b>. Quantities are never changed; lines Cardinal didn't
+    acknowledge are left as they are.</p>
+  <form id="ack-form" class="field-row">
+    <label class="field">Acknowledgement PDF
+      <input type="file" name="file" accept="application/pdf,.pdf" required>
+    </label>
+    <label class="field small">Requested date goes in
+      <select name="date_field">
+        <option value="due">PO due date</option>
+        <option value="txn">PO date</option>
+        <option value="none">Nowhere (memo only)</option>
+      </select>
+    </label>
+    <label class="field small"><span>&nbsp;</span>
+      <span><input type="checkbox" name="attach" id="ack-attach" checked> Attach PDF to the PO</span>
+    </label>
+    <div class="field small"><button type="submit" class="btn-primary">Check</button></div>
+  </form>
+  <p class="status-line" id="ack-status"></p>
+  <ul class="hint" id="ack-flags"></ul>
+</div>
+<div id="ack-pos"></div>
+<script src="{{ url_for('static', filename='order_ack.js') }}"></script>
+{% endblock %}
