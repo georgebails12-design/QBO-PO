@@ -61,7 +61,7 @@ function renderPo(po, result) {
     <div class="card-title-row">
       <h2>PO ${escapeHtml(po.po_number)} &middot; ${escapeHtml(po.vendor || '')} &middot; $${money(po.old_total)} -> $${money(po.new_total)}</h2>
     </div>
-    <p>${DATE_LABEL[po.date_field]}: ${po.old_date || '-'} -> ${po.new_date || '(unchanged)'}
+    <p>${DATE_LABEL[po.date_field]}: ${po.old_date || '-'} -> ${po.new_date || '(unchanged)'}${po.expected_field ? ` (also in ${escapeHtml(po.expected_field)})` : ''}
       &middot; Acknowledged $${money(po.ack_total)} on SO ${escapeHtml(po.sales_orders)}
       &middot; ${issues ? `<b style="${RED}">${issues} line(s) to check</b>` : 'All sizes and quantities match'}
       &middot; Status: ${status}</p>

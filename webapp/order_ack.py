@@ -34,6 +34,8 @@ What changes on the PO
     Quantities are never changed.
   - the date (--date-field): "due" (default) puts the Requested Date in the PO's
     Due date, "txn" puts it in the PO date, "none" leaves the dates alone.
+  - if the PO form has a custom field named like "Expected date", the
+    Requested Date goes there too (as MM/DD/YYYY).
   - a memo line: "Cardinal OA 11/12/26 SO 16967339: 30 lines $10,351.35,
     requested 11/24/26". It is added once; re-running changes nothing.
   - with --attach (and on the web page by default) the acknowledgement PDF is
@@ -43,6 +45,7 @@ Closed purchase orders are refused.
 
 import argparse
 import datetime as dt
+import math
 import os
 import re
 import sys
@@ -54,6 +57,10 @@ import qbo_client
 
 CENT = Decimal("0.01")
 SIZE_TOLERANCE = 1 / 64  # inches; sizes closer than this are the same size
+# How Cardinal bills (worked out from their acknowledgements): each side is rounded
+# up to the next even inch, and a piece is never charged at less than 3 sq ft.
+BILL_ROUND_INCHES = 2
+MIN_BILLED_SQFT = Decimal("3")
 DATE_FIELDS = ("due", "txn", "none")
 
 # 31392 1.000 16967339 1.000 5.7 T Q366/13.0 BEF/ 5.7 T QI89 91310 4 102.6668 570.91 439.9272 17.1400 1,759.71
@@ -121,6 +128,24 @@ def _date(text):
         return None
 
 
+def billing_check(row):
+    """Checks Cardinal's billed SQ FT against the size they printed, and the unit
+    price against SQ FT x price per sq ft. Returns flags (empty = all consistent)."""
+    flags = []
+
+    def up(x):
+        return BILL_ROUND_INCHES * math.ceil(x / BILL_ROUND_INCHES - 1e-9)
+    per_piece = Decimal(up(row["w"]) * up(row["h"])) / 144
+    expected = per_piece * row["qty"]
+    if abs(expected - row["sqft"]) > Decimal("0.001") * row["qty"]:
+        flags.append(f"Cardinal billed {row['sqft']} sq ft, but {row['size_text']} x {row['qty']} is "
+                     f"{expected:.4f} -- the size or the charge is off")
+    billed_piece = max(row["sqft"] / row["qty"], MIN_BILLED_SQFT) if row["qty"] else Decimal(0)
+    if abs(billed_piece * row["sqft_price"] - row["unit_price"]) > Decimal("0.01"):
+        flags.append(f"unit price {row['unit_price']} isn't SQ FT x ${row['sqft_price']}/sq ft")
+    return flags
+
+
 # ---------------------------------------------------------------------------
 # PDF -> acknowledgement
 # ---------------------------------------------------------------------------
@@ -162,6 +187,8 @@ def parse_text(text):
             row["w"], row["h"] = to_inches(sm.group("w")), to_inches(sm.group("h"))
         else:
             row["flags"].append("couldn't read the size under this line")
+        if sm:
+            row["flags"].extend(billing_check(row))
         if (row["unit_price"] * row["qty"]).quantize(CENT, rounding=ROUND_HALF_UP) != row["ext"]:
             row["flags"].append(f"Cardinal's math: {row['qty']} x {row['unit_price']} isn't {row['ext']:,}")
         ack["lines"].append(row)
@@ -336,15 +363,28 @@ def plan_po(ack, po_number, date_field="due"):
         old_date, new_date = po.get("TxnDate"), req.isoformat()
         payload["TxnDate"] = new_date
 
+    # If the PO form has an "Expected ..." custom field, the requested date goes there too.
+    expected_field = None
+    if req and date_field != "none":
+        fields = [dict(cf) for cf in po.get("CustomField") or []]
+        for cf in fields:
+            if "expected" in (cf.get("Name") or "").lower():
+                expected_field = cf.get("Name")
+                if cf.get("StringValue") != req.strftime("%m/%d/%Y"):
+                    cf["StringValue"] = req.strftime("%m/%d/%Y")
+                    cf.setdefault("Type", "StringType")
+                    payload["CustomField"] = fields
+                break
+
     old_total = cents(po.get("TotalAmt") or 0)
     new_total = sum(cents(ln.get("Amount") or 0) for ln in lines
                     if ln.get("DetailType") in ("ItemBasedExpenseLineDetail", "AccountBasedExpenseLineDetail"))
     unchanged = (all(r.get("unchanged", True) for r in rows if r["status"] != "missing")
-                 and not memo_changes and old_date == new_date)
+                 and not memo_changes and old_date == new_date and "CustomField" not in payload)
     return {
         "po_number": po_number, "po_id": po["Id"], "vendor": (po.get("VendorRef") or {}).get("name"),
         "status": po.get("POStatus"), "sales_orders": so, "ack_total": ack_total,
-        "date_field": date_field, "old_date": old_date, "new_date": new_date,
+        "date_field": date_field, "old_date": old_date, "new_date": new_date, "expected_field": expected_field,
         "old_total": old_total, "new_total": new_total, "lines": rows, "not_acknowledged": not_acked,
         "problems": problems, "note": note, "unchanged": unchanged, "payload": payload,
     }
@@ -403,7 +443,7 @@ def as_json(p):
                 "total": f(ack["total"]), "flags": ack["flags"], "line_count": len(ack["lines"])},
         "pos": [{
             **{k: po[k] for k in ("po_number", "po_id", "vendor", "status", "sales_orders", "date_field",
-                                  "old_date", "new_date", "problems", "note", "unchanged")},
+                                  "old_date", "new_date", "expected_field", "problems", "note", "unchanged")},
             "ack_total": f(po["ack_total"]), "old_total": f(po["old_total"]), "new_total": f(po["new_total"]),
             "lines": [{**{k: r[k] for k in ("po_line", "size", "qty", "desc", "flags", "po_item", "po_qty", "status")},
                        "unit_price": f(r["unit_price"]), "ext": f(r["ext"]), "old_rate": f(r["old_rate"]),

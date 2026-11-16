@@ -172,12 +172,15 @@ venv/bin/python order_ack.py Order_Acknowledgement_Summary.pdf --apply --attach 
   `40 3/8" x 86 5/16" (Job# ... Unit# ...)`, compared in inches. Repeated sizes go
   to the line with the same quantity and the closest line number.
 - Flagged: sizes not on the PO (with the closest PO line within an inch), width
-  and height swapped, quantity different from the PO, PO lines the
+  and height swapped, quantity different from the PO, square footage Cardinal billed
+  that doesn't fit the size (sides rounded up to the next even inch, 3 sq ft minimum
+  per piece), PO lines the
   acknowledgement doesn't cover, and Cardinal's own arithmetic/total.
 - Matched lines get Rate = Cardinal's unit price (per piece) and Amount = qty x rate.
   Quantities and unmatched lines are never changed.
-- The Requested Date goes in the PO due date (`--date-field due`, default), the PO
-  date (`txn`), or nowhere (`none`). A memo line records the acknowledgement date,
+- The Requested Date (the expected date) goes in the PO due date (`--date-field due`, default), the PO
+  date (`txn`), or nowhere (`none`), and also in an "Expected ..." custom field if
+  the PO form has one. A memo line records the acknowledgement date,
   sales order, line count, total and requested date, once.
 - `--attach` attaches the PDF to the PO (once). Closed POs are refused. Re-running
   changes nothing.
