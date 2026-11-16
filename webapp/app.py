@@ -711,6 +711,7 @@ def _commission_check(job_dir):
         result["support"] = {
             "pages": len(pages), "missing": missing,
             "extra": [{"number": n, "pages": p} for n, p in sorted(extra.items())],
+            "suggestions": commission_support.suggest_bills(extra, pages, commission_support.q_numbers_for(plan["rows"])),
             "notes": notes, "matched": {n: p for n, p in groups.items() if p},
         }
     return result
