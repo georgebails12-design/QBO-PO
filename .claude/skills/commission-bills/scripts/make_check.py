@@ -1,7 +1,7 @@
 """
 Build the commission-bills check workbook (no QuickBooks connection needed).
 
-    python3 make_check.py <commission workbook.xlsx> <output.xlsx>
+    python3 make_check.py <commission workbook.xlsx> <output.xlsx> [first row] [payroll date MM/DD/YYYY]
 
 Lists every bill commission_bills.py would create, in the QuickBooks import
 layout plus check columns, with totals by vendor and a reconciliation back to
@@ -18,8 +18,9 @@ from openpyxl.utils import get_column_letter as L
 import openpyxl
 
 src, out = sys.argv[1], sys.argv[2]
-sheet, rows = cb.read_rows(src)
-due = cb.due_date_from_sheet(sheet, rows)
+start_row = int(sys.argv[3]) if len(sys.argv) > 3 else 2
+sheet, rows = cb.read_rows(src, start_row=start_row)
+due = (cb.as_date(sys.argv[4]) if len(sys.argv) > 4 else None) or cb.due_date_from_sheet(sheet, rows)
 vm = json.load(open(os.path.join(WEBAPP, "commission_vendors.json")))
 vm = {cb.norm(k): v for k, v in vm.items() if not k.startswith("_")}
 raw = list(openpyxl.load_workbook(src, data_only=True).worksheets[0].iter_rows(values_only=True))
@@ -32,7 +33,7 @@ if any(r["second"] for r in rows) and cb.norm("2nd Comm") not in vm:
 
 bills = []
 for r in rows:
-    x = raw[r["excel_row"] - 1]
+    x = {9: r["panda"], 13: r["rate"]}  # read_rows already fixed shifted rows
     m = vm[cb.norm(r["rep"])]
     vendors = [m] if isinstance(m, str) else m
     for v in vendors:
@@ -54,7 +55,7 @@ for i, h in enumerate(hdr, 1):
     c = ws.cell(1, i); c.font = Font(bold=True, color="FFFFFF" if i <= 14 else "000000")
     c.fill = green if i <= 14 else grey; c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 for n, (r, v, amt, rate, desc, kind) in enumerate(bills, 2):
-    x = raw[r["excel_row"] - 1]
+    x = {9: r["panda"], 13: r["rate"]}  # read_rows already fixed shifted rows
     ws.append(["Yes", r["pay_date"], due, r["doc_number"], "Bill", r["customer"], v, desc, 1, float(amt),
                cb.DEFAULT_ACCOUNT, cb.DEFAULT_CLASS, r["q_number"], desc,
                r["excel_row"], r["rep"], kind, x[9], rate,

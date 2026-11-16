@@ -92,8 +92,12 @@ def note_rate(notes, name):
     first = re.escape(name.split()[0]) if name else ""
     if not first or not notes:
         return None
+    initials = re.escape("".join(w[0] for w in name.split() if w)) if len(name.split()) > 1 else None
     m = (re.search(rf"\b{first}\b\s*[:=-]?\s*(\d+(?:\.\d+)?)\s*%?", notes, re.I)
-         or re.search(rf"(\d+(?:\.\d+)?)\s*%?\s*-?\s*{first}\b", notes, re.I))
+         or re.search(rf"(\d+(?:\.\d+)?)\s*%?\s*-?\s*{first}\b", notes, re.I)
+         # initials, e.g. "5.0% TB + 3.0% PANDA" for Trevor Benthagen
+         or (initials and re.search(rf"(\d+(?:\.\d+)?)\s*%?\s*{initials}\b", notes))
+         or (initials and re.search(rf"\b{initials}\s*(\d+(?:\.\d+)?)\s*%", notes)))
     return float(m.group(1)) / 100 if m else None
 
 
@@ -234,6 +238,7 @@ def main():
     ap.add_argument("items_json")
     ap.add_argument("date", help="payroll / commission date, YYYY-MM-DD")
     ap.add_argument("--workbook")
+    ap.add_argument("--start-row", type=int, default=2, help="first sheet row of this payroll")
     ap.add_argument("--xlsx", help="add a 'Monday check' tab to this workbook (created if missing)")
     args = ap.parse_args()
 
@@ -247,7 +252,7 @@ def main():
             print(f"  {m['q']:<12} {m['type']:<12} P# {m['panda'] or 0:>10,.0f}  {m['item'][:35]:<35} {describe(m)}")
         return 0
 
-    _, rows = cb.read_rows(args.workbook)
+    _, rows = cb.read_rows(args.workbook, start_row=args.start_row)
     vmap_raw = json.load(open(os.path.join(WEBAPP, "commission_vendors.json")))
     vmap = {cb.norm(k): v for k, v in vmap_raw.items() if not k.startswith("_")}
     findings = compare(mlines, rows, vmap, vmap.get(cb.norm(cb.SECOND_COMM_KEY)))
