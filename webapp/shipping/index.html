@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panda Shipping Calculator</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="shell">
+  <div class="appHeader">
+    <div class="brand"><a href="/" style="color:inherit;text-decoration:none;opacity:.55;font-weight:500;">&larr; Purchase Orders</a>&nbsp;&nbsp;Panda Shipping Calculator</div>
+    <div class="formulaVersion" id="formulaVersionTag"></div>
+  </div>
+
+  <!-- UPLOAD -->
+  <section id="view-upload" class="view">
+    <div class="uploadIntro">
+      <h1>Calculate shipping &amp; crating</h1>
+      <p>Upload a Panda Sales Order to calculate estimated shipping and crating.</p>
+    </div>
+    <div id="dropzone" class="dropzone">
+      <div id="dropzoneEmpty">
+        <div class="dzIcon">&#8593;</div>
+        <div class="dzTitle">Drag Sales Order here</div>
+        <div class="dzOr">or</div>
+        <button id="chooseFileBtn" type="button" class="btn btnPrimary">Choose File</button>
+        <div class="dzHint">PDF, JPG, PNG supported</div>
+      </div>
+      <div id="dropzoneFile" style="display:none;">
+        <div class="fileCard">
+          <div class="fileIcon" id="fileIconBadge">PDF</div>
+          <div class="fileMeta">
+            <div class="fileName" id="fileNameText"></div>
+            <div class="fileSize" id="fileSizeText"></div>
+          </div>
+          <button id="replaceFileBtn" type="button" class="linkBtn">Replace</button>
+        </div>
+        <button id="analyzeBtn" type="button" class="btn btnPrimary btnBlock">Analyze Sales Order</button>
+      </div>
+    </div>
+    <div id="uploadError" class="errorNote" style="display:none;"></div>
+    <p class="uploadFootnote">Calculations are performed from information found on the uploaded Sales Order.</p>
+  </section>
+
+  <!-- PROCESSING -->
+  <section id="view-processing" class="view" style="display:none;">
+    <div class="processingCard">
+      <div class="processingTitle">Analyzing Sales Order</div>
+      <div class="progressTrack"><div class="progressFill" id="progressFill"></div></div>
+      <div class="processingStep" id="processingStep">Reading Sales Order...</div>
+    </div>
+  </section>
+
+  <!-- REVIEW -->
+  <section id="view-review" class="view" style="display:none;">
+    <div class="reviewHead">
+      <h1>Review order information</h1>
+      <p>We found the following information on the Sales Order. Please verify before calculating shipping.</p>
+    </div>
+    <div id="confidenceBannerReview"></div>
+    <div class="reviewGrid">
+      <div class="card">
+        <div class="cardLabel">Destination</div>
+        <div class="fieldRow"><div class="fieldK">Ship to (city)</div><input class="fieldInput" id="f_city" type="text" aria-label="Ship to city"></div>
+        <div class="fieldRow"><div class="fieldK">State / Province</div><input class="fieldInput" id="f_state" type="text" maxlength="2" style="text-transform:uppercase;" aria-label="State or province code"></div>
+        <div class="fieldRow"><div class="fieldK">ZIP / Postal code</div><input class="fieldInput" id="f_zip" type="text" aria-label="ZIP or postal code"></div>
+        <div class="fieldRow"><div class="fieldK">Distance</div><div class="fieldStatic" id="f_distanceDisplay">&mdash;</div></div>
+      </div>
+      <div class="card">
+        <div class="cardLabel">Order</div>
+        <div class="fieldRow"><div class="fieldK">Doors</div><input class="fieldInput" id="f_doors" type="number" min="0" aria-label="Number of doors"></div>
+        <div class="adjustedNote" id="f_doors_note">Manually adjusted</div>
+        <div class="fieldRow"><div class="fieldK">Windows</div><input class="fieldInput" id="f_windows" type="number" min="0" aria-label="Number of windows"></div>
+        <div class="adjustedNote" id="f_windows_note">Manually adjusted</div>
+        <div class="fieldRow"><div class="fieldK">Total area</div><div class="fieldStatic" id="f_areaDisplay">&mdash;</div></div>
+        <div class="fieldRow"><div class="fieldK">Largest panel W (in)</div><input class="fieldInput" id="f_panelW" type="number" min="0" step="0.1" aria-label="Largest panel width in inches"></div>
+        <div class="fieldRow"><div class="fieldK">Largest panel H (in)</div><input class="fieldInput" id="f_panelH" type="number" min="0" step="0.1" aria-label="Largest panel height in inches"></div>
+      </div>
+      <div class="card">
+        <div class="cardLabel">Shipping conditions</div>
+        <div class="fieldRow"><div class="fieldK">Oversize</div>
+          <select class="fieldInput" id="f_oversize" aria-label="Oversize status" style="text-align:right;">
+            <option value="no">No</option><option value="yes">Yes</option>
+          </select>
+        </div>
+        <div class="fieldRow"><div class="fieldK">Door crates</div><input class="fieldInput" id="f_doorCrates" type="number" min="0" aria-label="Door crate count"></div>
+        <div class="fieldRow"><div class="fieldK">Window crates</div><input class="fieldInput" id="f_windowCrates" type="number" min="0" aria-label="Window crate count"></div>
+        <div class="fieldRow"><div class="fieldK">Track crates</div><input class="fieldInput" id="f_trackCrates" type="number" min="0" aria-label="Track crate count"></div>
+        <div class="crateRuleNote">Crate counts assume products from different line items are not combined into shared crates, and that the oversize adjustment applies to the whole shipment. Both are pending business confirmation &mdash; treat crate counts as an estimate until confirmed.</div>
+      </div>
+    </div>
+    <div class="reviewActions">
+      <button id="backToUploadBtn" type="button" class="linkBtn">&larr; Upload a different file</button>
+      <button id="calculateBtn" type="button" class="btn btnPrimary btnLg">Calculate Shipping</button>
+    </div>
+  </section>
+
+  <!-- RESULTS -->
+  <section id="view-results" class="view" style="display:none;">
+    <div id="confidenceBannerResults"></div>
+
+    <div class="heroCard">
+      <div class="heroTop">
+        <div class="heroTopLeft">
+          <div class="heroLabel">Shipping Estimate</div>
+          <div class="heroAmount" id="heroTotal">$0.00</div>
+          <div class="heroSub">ESTIMATED SHIPPING + CRATING</div>
+        </div>
+        <div class="heroMethod">
+          <div class="heroMethodLabel">Method</div>
+          <div class="heroMethodVal" id="heroMethodVal">&mdash;</div>
+          <div class="heroMethodFull" id="heroMethodFull"></div>
+        </div>
+      </div>
+      <div class="heroSplit">
+        <div class="heroSplitRow"><span>Shipping</span><span id="heroShipping">$0.00</span></div>
+        <div class="heroSplitRow"><span>Crating</span><span id="heroCrating">$0.00</span></div>
+      </div>
+    </div>
+
+    <div class="twoCol">
+      <div class="card">
+        <div class="cardLabel">Shipment</div>
+        <div class="statRow"><span class="statK">Destination</span><span class="statV" id="r_destination">&mdash;</span></div>
+        <div class="statRow"><span class="statK">Distance</span><span class="statV" id="r_distance">&mdash;</span></div>
+        <div class="statRow"><span class="statK">Doors / Windows</span><span class="statV" id="r_units">&mdash;</span></div>
+        <div class="statRow"><span class="statK">Shipping method</span><span class="statV" id="r_mode">&mdash;</span></div>
+        <div id="r_oversizeBadgeWrap"></div>
+      </div>
+      <div class="card">
+        <div class="cardLabel">Crating</div>
+        <div class="statRow"><span class="statK">Total crates</span><span class="statV" id="r_totalCrates">&mdash;</span></div>
+        <div class="statRow"><span class="statK">Door crates</span><span class="statV" id="r_doorCrates">&mdash;</span></div>
+        <div class="statRow"><span class="statK">Window crates</span><span class="statV" id="r_windowCrates">&mdash;</span></div>
+        <div class="statRow"><span class="statK">Track crates</span><span class="statV" id="r_trackCrates">&mdash;</span></div>
+        <div class="maxCrateBox">
+          <div class="maxCrateLabel">Estimated maximum crate</div>
+          <div class="maxCrateVal" id="r_maxCrate">&mdash;</div>
+          <div class="maxCrateNote">Based on the largest detected panel dimensions plus required crate clearance. Not a guarantee every crate is this size.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card compareCard">
+      <div class="cardLabel" id="compareTitle">Current vs Proposed</div>
+      <table class="compareTable">
+        <thead><tr><th></th><th id="compareColA">Current</th><th id="compareColB">Proposed</th></tr></thead>
+        <tbody id="compareBody"></tbody>
+      </table>
+      <div class="sourceNote" id="compareSourceNote"></div>
+    </div>
+
+    <div class="collapseCard">
+      <button class="collapseHead" id="calcDetailsToggle" type="button" aria-expanded="false">
+        <span>Calculation Details</span><span class="chev">&#9660;</span>
+      </button>
+      <div class="collapseBody" id="calcDetailsBody" style="display:none;">
+        <div id="logPanel"></div>
+        <div class="formulaVersionNote" id="calcFormulaVersion"></div>
+      </div>
+    </div>
+
+    <div class="collapseCard">
+      <button class="collapseHead" id="extractedToggle" type="button" aria-expanded="false">
+        <span>Extracted Sales Order Data</span><span class="chev">&#9660;</span>
+      </button>
+      <div class="collapseBody" id="extractedBody" style="display:none;">
+        <table class="matrix" id="orderMatrix"></table>
+      </div>
+    </div>
+
+    <div class="resultsActions">
+      <button id="copySummaryBtn" type="button" class="linkBtn">Copy Summary</button>
+      <button id="uploadAnotherBtn" type="button" class="btn btnSecondary">Upload Another Sales Order</button>
+    </div>
+  </section>
+
+  <!-- FAILURE -->
+  <section id="view-failure" class="view" style="display:none;">
+    <div class="card failCard">
+      <div class="failTitle" id="failTitle">Shipping cannot be calculated yet.</div>
+      <div class="failBody" id="failBody"></div>
+      <button id="failBackBtn" type="button" class="btn btnPrimary">Back to Review</button>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
+<script src="pricing.js"></script>
+<script src="parser.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
