@@ -26,7 +26,7 @@ import time
 import uuid
 
 import requests
-from flask import Flask, Response, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
 
 import auth
 import bill_adjust
@@ -141,6 +141,29 @@ def purchase_orders_page():
 @auth.login_required
 def bill_adjust_page():
     return render_template("bill_adjust.html", user=auth.current_user(), today=datetime.date.today().isoformat())
+
+
+# Shipping & crating calculator: a static, client-side page (shipping/), behind
+# the PO login. Only these files are served; see shipping/README.md.
+SHIPPING_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shipping")
+SHIPPING_FILES = {"index.html", "style.css", "pricing.js", "parser.js", "app.js"}
+
+
+@app.route("/shipping")
+@auth.login_required
+def shipping_redirect():
+    return redirect("/shipping/")
+
+
+@app.route("/shipping/", defaults={"name": "index.html"})
+@app.route("/shipping/<name>")
+@auth.login_required
+def shipping_page(name):
+    if name not in SHIPPING_FILES:
+        abort(404)
+    resp = send_from_directory(SHIPPING_DIR, name)
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 @app.route("/commissions")
