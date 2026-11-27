@@ -106,6 +106,7 @@ def q_base(q):
 PAGE_KINDS = [
     ("Receipt", re.compile(r"\bReceipt\b.*Reference\s*No|Received\s*From", re.I | re.S)),
     ("Panda Number Report", re.compile(r"PANDA\s*NUMBER\s*REPORT", re.I)),
+    ("Sales Order", re.compile(r"SALES\s*ORDER", re.I)),
     ("Crate & freight sheet", re.compile(r"CRATE\s*&?\s*FREIGHT|Crate\s*Total", re.I)),
     ("Quote", re.compile(r"\bQuote\s*(Number|Date|#)", re.I)),
     ("Invoice", re.compile(r"\bInvoice\b", re.I)),
@@ -113,7 +114,7 @@ PAGE_KINDS = [
 
 
 def page_kind(text):
-    """What a support page is: Receipt, Panda Number Report, Crate & freight sheet, Quote, Invoice, Other."""
+    """What a support page is: Receipt, Panda Number Report, Sales Order, Crate & freight sheet, Quote, Invoice, Other."""
     for name, rx in PAGE_KINDS:
         if rx.search(text or ""):
             return name
