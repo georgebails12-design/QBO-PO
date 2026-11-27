@@ -1,5 +1,5 @@
 {
-  "_comment": "Sales rep name as written in column B of the commission sheet -> QuickBooks vendor display name. For a shared deal list each vendor; each is paid the row's full commission unless a \"share\" (e.g. 0.5) is given. \"2nd Comm\" is the vendor paid the sheet's 2nd Comm column (the 0.5% override). \"2nd Comm by invoice\" sends one invoice's 2nd Comm to someone else (e.g. Cecile instead of Ann).",
+  "_comment": "Sales rep name as written in column B of the commission sheet -> QuickBooks vendor display name. For a shared deal list each vendor; each is paid the row's full commission unless a \"share\" (e.g. 0.5) is given. \"2nd Comm\" is the vendor paid the sheet's 2nd Comm column (the 0.5% override). \"2nd Comm by invoice\" sends one invoice's 2nd Comm to someone else (e.g. Cecile instead of Ann). A rep code can name the sales assistant after the rep (\"Stefan Cecil\", \"Derrick Anne\"): the rep is billed as usual and that assistant gets the 2nd Comm, via \"2nd Comm by name\".",
   "Derrick": "MCCALL DERRICK",
   "Efrain": "ZARATE EFRAIN",
   "Trevor": "BENTHAGEN TREVOR",
@@ -47,5 +47,18 @@
   "2nd Comm": "PUTNAM ANN MARIE",
   "2nd Comm by invoice": {
     "17589": "MACAPINLAC CECILE"
+  },
+  "Tyler Greg": [
+    "CLARK TYLER",
+    {
+      "vendor": "BRAWNER GREG",
+      "share": 0.5
+    }
+  ],
+  "2nd Comm by name": {
+    "Ann": "PUTNAM ANN MARIE",
+    "Anne": "PUTNAM ANN MARIE",
+    "Cecil": "MACAPINLAC CECILE",
+    "Cecile": "MACAPINLAC CECILE"
   }
 }
