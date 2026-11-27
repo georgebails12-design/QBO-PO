@@ -35,6 +35,7 @@ function renderCheck(check, posted) {
   $('commission-summary-title').textContent =
     `${check.bills.length} bills, $${money(check.total)} -- due ${check.due_date} (${check.rows} rows)`;
 
+  const s = check.support;
   const created = {};
   ((posted && posted.results) || []).forEach((r) => { created[`${r.doc}|${r.vendor}`] = r; });
   $('commission-bills-body').innerHTML = check.bills.map((b) => {
@@ -44,7 +45,7 @@ function renderCheck(check, posted) {
       : p.result === 'failed' ? `<span style="color:#b3432f">Failed: ${escapeHtml(p.error)}</span>` : escapeHtml(p.result);
     return `<tr><td>${b.row}</td><td>${escapeHtml(b.doc)}</td><td>${b.date}</td><td>${escapeHtml(b.vendor)}</td>
       <td class="amount-cell">${money(b.amount)}</td><td title="${escapeHtml(b.description)}">${escapeHtml(b.customer)}</td>
-      <td>${escapeHtml(b.q)}</td><td>${status}</td></tr>`;
+      <td>${escapeHtml(b.q)}</td><td class="hint">${escapeHtml(b.support || (s ? 'none found' : ''))}</td><td>${status}</td></tr>`;
   }).join('');
   $('commission-vendor-body').innerHTML = check.by_vendor.map((v) =>
     `<tr><td>${escapeHtml(v.vendor)}</td><td>${v.bills}</td><td class="amount-cell">${money(v.amount)}</td></tr>`).join('')
@@ -56,7 +57,6 @@ function renderCheck(check, posted) {
     parts.push('<p><b>Rows that will not be billed until fixed:</b></p>' + list(check.problems.map((p) =>
       `Row ${p.row} ${escapeHtml(p.doc)} (${escapeHtml(p.rep)}, $${money(p.amount)}): ${escapeHtml(p.why)}`)));
   }
-  const s = check.support;
   if (s) {
     if (s.missing.length) {
       parts.push(`<p><b>Missing support</b> (on the sheet, no page in the ${s.pages}-page scan):</p>` + list(s.missing.map((m) =>

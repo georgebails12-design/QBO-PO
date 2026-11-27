@@ -2,10 +2,16 @@
 Build the commission-bills check workbook (no QuickBooks connection needed).
 
     python3 make_check.py <commission workbook.xlsx> <output.xlsx> [first row] [payroll date MM/DD/YYYY]
+                          [--support <scan.pdf> | --ocr <pages.json>]
 
 Lists every bill commission_bills.py would create, in the QuickBooks import
 layout plus check columns, with totals by vendor and a reconciliation back to
 the source sheet. Exits 2 if a rep in column B has no vendor mapping.
+
+With --support (the scanned backup PDF) or --ocr (its pages already read, as
+JSON [[page, text], ...]), each bill also lists the support pages that will be
+attached to it (receipt, Panda Number Report, quote, crating sheet), and a
+"Support" tab lists every page of the scan and where it goes.
 """
 import sys, os, json
 WEBAPP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "webapp")
@@ -17,10 +23,27 @@ from openpyxl.formatting.rule import FormulaRule
 from openpyxl.utils import get_column_letter as L
 import openpyxl
 
-src, out = sys.argv[1], sys.argv[2]
-start_row = int(sys.argv[3]) if len(sys.argv) > 3 else 2
+argv = sys.argv[1:]
+opt = {}
+for flag in ("--support", "--ocr"):
+    if flag in argv:
+        i = argv.index(flag); opt[flag] = argv[i + 1]; del argv[i:i + 2]
+src, out = argv[0], argv[1]
+start_row = int(argv[2]) if len(argv) > 2 else 2
 sheet, rows = cb.read_rows(src, start_row=start_row)
-due = (cb.as_date(sys.argv[4]) if len(sys.argv) > 4 else None) or cb.due_date_from_sheet(sheet, rows)
+due = (cb.as_date(argv[3]) if len(argv) > 3 else None) or cb.due_date_from_sheet(sheet, rows)
+
+support = None
+if opt:
+    import commission_support as cs
+    if "--ocr" in opt:
+        pages = [(n, t, "ocr") for n, t in json.load(open(opt["--ocr"]))]
+    else:
+        pages = cs.page_texts(opt["--support"])
+    invoices = sorted({r["doc_number"].split()[0] for r in rows})
+    groups, notes, extra = cs.match_pages(pages, invoices, cs.q_numbers_for(rows))
+    support = {"pages": pages, "groups": groups, "notes": notes, "extra": extra,
+               "all": {**groups, **extra}}
 vm = json.load(open(os.path.join(WEBAPP, "commission_vendors.json")))
 vm = {cb.norm(k): v for k, v in vm.items() if not k.startswith("_")}
 raw = list(openpyxl.load_workbook(src, data_only=True).worksheets[0].iter_rows(values_only=True))
@@ -49,6 +72,8 @@ wb = Workbook(); ws = wb.active; ws.title = "Bills to Post"
 hdr = ["Post?", "Bill Date", "Due Date", "Bill Number", "Transaction Type", "Customer", "Vendor",
        "Description", "Qty", "Unit Price", "Category", "Class", "Q Number/PO #", "Memo",
        "Source Row", "Rep (col B)", "Bill Kind", "Panda #", "Rate", "Expected Amount", "Amount OK?", "Memo = Description?"]
+if support:
+    hdr.append("Support pages attached")
 ws.append(hdr)
 green = PatternFill("solid", fgColor="1F9D45"); grey = PatternFill("solid", fgColor="D9D9D9")
 for i, h in enumerate(hdr, 1):
@@ -59,7 +84,9 @@ for n, (r, v, amt, rate, desc, kind) in enumerate(bills, 2):
     ws.append(["Yes", r["pay_date"], due, r["doc_number"], "Bill", r["customer"], v, desc, 1, float(amt),
                cb.DEFAULT_ACCOUNT, cb.DEFAULT_CLASS, r["q_number"], desc,
                r["excel_row"], r["rep"], kind, x[9], rate,
-               f"=ROUND(R{n}*S{n},2)", f'=IF(ABS(J{n}-T{n})<=0.01,"OK","CHECK")', f'=IF(H{n}=N{n},"OK","CHECK")'])
+               f"=ROUND(R{n}*S{n},2)", f'=IF(ABS(J{n}-T{n})<=0.01,"OK","CHECK")', f'=IF(H{n}=N{n},"OK","CHECK")']
+              + ([cs.describe_pages(support["groups"][r["doc_number"].split()[0]], support["pages"]) or "MISSING"]
+                 if support else []))
 last = ws.max_row
 t = last + 2
 ws.cell(t, 9, "Total").font = Font(bold=True)
@@ -70,12 +97,14 @@ for row in ws.iter_rows(min_row=2, max_row=last):
     row[9].number_format = row[19].number_format = '#,##0.00'
     row[17].number_format = '#,##0'; row[18].number_format = '0.0##%'
 ws.cell(t, 10).number_format = '#,##0.00'
-widths = [7, 11, 11, 15, 11, 48, 20, 70, 5, 11, 22, 11, 14, 70, 8, 10, 22, 10, 8, 12, 10, 12]
+widths = [7, 11, 11, 15, 11, 48, 20, 70, 5, 11, 22, 11, 14, 70, 8, 10, 22, 10, 8, 12, 10, 12, 60]
 for i, w in enumerate(widths, 1): ws.column_dimensions[L(i)].width = w
 ws.freeze_panes = "E2"; ws.auto_filter.ref = f"A1:{L(len(hdr))}{last}"
 red = PatternFill("solid", fgColor="F8CBAD")
 ws.conditional_formatting.add(f"U2:V{last}", FormulaRule(formula=['U2="CHECK"'], fill=red))
 ws.conditional_formatting.add(f"V2:V{last}", FormulaRule(formula=['V2="CHECK"'], fill=red))
+if support:
+    ws.conditional_formatting.add(f"W2:W{last}", FormulaRule(formula=['W2="MISSING"'], fill=red))
 
 # Summary
 s = wb.create_sheet("Totals by Vendor")
@@ -109,4 +138,32 @@ for row in s.iter_rows(min_row=2): row[2].number_format = '#,##0.00'
 s.column_dimensions["A"].width = 58; s.column_dimensions["B"].width = 8; s.column_dimensions["C"].width = 14
 s.cell(base + 8, 1, "Note: 2nd Comm is rounded to cents per bill, so the difference can be off by a cent or two.")
 # column is rounded to cents per bill, so the difference can be off by a cent or two."])
+if support:
+    sp = wb.create_sheet("Support")
+    sp.append(["Invoice", "On sheet?", "Pages", "What the pages are", "Bills it attaches to"])
+    for c in sp[1]: c.font = Font(bold=True, color="FFFFFF"); c.fill = green
+    bills_of = {}
+    for r, v, amt, *_ in bills:
+        bills_of.setdefault(r["doc_number"].split()[0], []).append(f"{r['doc_number']} {v} {float(amt):,.2f}")
+    for n in sorted(support["all"]):
+        pg = support["all"][n]
+        on = n in support["groups"]
+        sp.append([n, "Yes" if on else "NOT ON SHEET", len(pg), cs.describe_pages(pg, support["pages"]) or "MISSING",
+                   "; ".join(bills_of.get(n, [])) if on else "Any '" + n + " Final/Deposit' bill due this payroll"])
+    for row in sp.iter_rows(min_row=2):
+        if row[1].value != "Yes" or row[3].value == "MISSING":
+            for c in row: c.fill = red
+    k = sp.max_row + 2
+    sp.cell(k, 1, "Every page of the scan").font = Font(bold=True)
+    sp.append(["Page", "What it is", "Goes to"])
+    where = {p: n for n, ps in support["all"].items() for p in ps}
+    for pno, text, _ in support["pages"]:
+        sp.append([pno, cs.page_kind(text), where.get(pno, "NOT ATTACHED")])
+        if pno not in where:
+            for c in sp[sp.max_row]: c.fill = red
+    if support["notes"]:
+        sp.append([]); sp.append(["Pages to look at"]); sp[sp.max_row][0].font = Font(bold=True)
+        for note in support["notes"]: sp.append([note])
+    for col, w in zip("ABCDE", (10, 14, 8, 80, 90)): sp.column_dimensions[col].width = w
+    sp.freeze_panes = "A2"
 wb.save(out); print(len(bills), "bills")

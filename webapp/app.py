@@ -705,7 +705,7 @@ def _commission_check(job_dir):
         pages = commission_support.page_texts(scan)
         groups, notes, extra = commission_support.match_pages(pages, invoices,
                                                               commission_support.q_numbers_for(plan["rows"]))
-        commission_support.split_pdf(scan, groups, os.path.join(job_dir, "support"))
+        commission_support.split_pdf(scan, {**groups, **extra}, os.path.join(job_dir, "support"))
         missing = [{"doc": r["doc_number"], "rep": r["rep"], "amount": float(r["amount"]), "customer": r["customer"]}
                    for r in plan["rows"] if not groups[r["doc_number"].split()[0]]]
         result["support"] = {
@@ -713,7 +713,11 @@ def _commission_check(job_dir):
             "extra": [{"number": n, "pages": p} for n, p in sorted(extra.items())],
             "suggestions": commission_support.suggest_bills(extra, pages, commission_support.q_numbers_for(plan["rows"])),
             "notes": notes, "matched": {n: p for n, p in groups.items() if p},
+            "described": {n: commission_support.describe_pages(p, pages)
+                          for n, p in {**groups, **extra}.items() if p},
         }
+        for b in bills:
+            b["support"] = result["support"]["described"].get(b["doc"].split()[0], "")
     return result
 
 
@@ -744,7 +748,9 @@ def _commission_attach(job_dir):
     files = _support_files(job_dir)
     if not files:
         raise ValueError("No support pages to attach -- upload the scanned support and run the check first.")
-    res = commission_support.attach_support(files, rows, commission_bills.as_date(meta["due_date"]))
+    on_sheet = {r["doc_number"].split()[0] for r in rows}
+    res = commission_support.attach_support(files, rows, commission_bills.as_date(meta["due_date"]),
+                                            extra=[n for n in files if n not in on_sheet])
     res["attached"] = [{"id": i, "doc": d, "vendor": v, "file": f} for i, d, v, f in res["attached"]]
     return res
 

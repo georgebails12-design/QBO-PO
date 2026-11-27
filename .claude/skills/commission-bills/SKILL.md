@@ -45,10 +45,15 @@ Extra bills:
 3. **Build the check workbook:**
 
    ```bash
-   python3 .claude/skills/commission-bills/scripts/make_check.py <workbook.xlsx> <scratchpad>/Commission_Bills_Check_<Mon_DD_YYYY>.xlsx
+   python3 .claude/skills/commission-bills/scripts/make_check.py <workbook.xlsx> <scratchpad>/Commission_Bills_Check_<Mon_DD_YYYY>.xlsx \
+       <first row> <MM/DD/YYYY> --support <scan.pdf>
    ```
 
-   Then recalculate it (`soffice --headless --convert-to xlsx --outdir <dir> <file>`)
+   With `--support` (or `--ocr <pages.json>` if the scan is already read),
+   each bill shows the support pages that will be attached to it, and a
+   "Support" tab lists every invoice's pages (receipt, Panda Number Report,
+   quote, crating sheet) and every page of the scan with where it goes.
+   Anything MISSING or NOT ATTACHED is red. Then recalculate it (`soffice --headless --convert-to xlsx --outdir <dir> <file>`)
    and confirm every `Amount OK?` / `Memo = Description?` cell is "OK", and
    that the "Difference" on the Totals by Vendor tab is 0.00 (a cent or two
    from 2nd Comm rounding is fine). Send the file to the user with
@@ -96,8 +101,11 @@ Extra bills:
    - **MISSING SUPPORT:** a sheet row with no page.
    - **In the scan but not on the sheet:** an invoice number with no
      commission row, which may be a missing commission.
-   - **Pages to look at:** a page with no invoice number is kept with the
-     page before it.
+   - **Pages to look at:** a page with no invoice number (a Panda Number
+     Report, quote or crating sheet) goes to the job whose Q# it shows, from
+     the sheet or that job's receipt "Reference No"; otherwise it is kept
+     with the page before it. Every page for an invoice is attached to all
+     its bills.
 
    For each invoice in the scan but not on the sheet, the check suggests the bill.
    It reads the receipt (date paid, amount, Q#), looks up the invoice's
