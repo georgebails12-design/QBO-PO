@@ -48,7 +48,8 @@ vm = json.load(open(os.path.join(WEBAPP, "commission_vendors.json")))
 vm = {cb.norm(k): v for k, v in vm.items() if not k.startswith("_")}
 raw = list(openpyxl.load_workbook(src, data_only=True).worksheets[0].iter_rows(values_only=True))
 
-missing = sorted({r["rep"] for r in rows if cb.norm(r["rep"]) not in vm})
+rep_code = {r["rep"]: cb.split_rep(r["rep"], vm)[0] for r in rows}
+missing = sorted({r["rep"] for r in rows if cb.norm(rep_code[r["rep"]]) not in vm})
 if missing:
     sys.exit(print("No vendor in commission_vendors.json for: " + ", ".join(missing)) or 2)
 if any(r["second"] for r in rows) and cb.norm("2nd Comm") not in vm:
@@ -57,7 +58,7 @@ if any(r["second"] for r in rows) and cb.norm("2nd Comm") not in vm:
 bills = []
 for r in rows:
     x = {9: r["panda"], 13: r["rate"]}  # read_rows already fixed shifted rows
-    m = vm[cb.norm(r["rep"])]
+    m = vm[cb.norm(rep_code[r["rep"]])]
     vendors = [m] if isinstance(m, str) else m
     for v in vendors:
         name, share = (v, 1.0) if isinstance(v, str) else (v["vendor"], float(v.get("share", 1)))
@@ -65,7 +66,7 @@ for r in rows:
         bills.append((r, name, cb.money(r["amount"] * cb.Decimal(str(share))), x[13] * share, desc,
                       "Commission" if len(vendors) == 1 else f"Shared deal ({r['rep']})"))
     if r["second"]:
-        sv = (vm.get(cb.norm(cb.SECOND_COMM_BY_INVOICE_KEY)) or {}).get(r["doc_number"].split()[0]) or vm[cb.norm("2nd Comm")]
+        sv = cb.second_comm_vendor_name(r, vm)
         bills.append((r, sv, r["second"], 0.005, r["second_description"], "2nd Comm override"))
 
 wb = Workbook(); ws = wb.active; ws.title = "Bills to Post"
@@ -122,7 +123,7 @@ o = sum(float(r["amount"]) for r in rows); p = sum(float(r["second"] or 0) for r
 def shares(m):
     return [1.0] if isinstance(m, str) else [1.0 if isinstance(v, str) else float(v.get("share", 1)) for v in m]
 extra = sum(float(cb.money(r["amount"] * cb.Decimal(str(sh)))) for r in rows
-            for sh in shares(vm[cb.norm(r["rep"])])[1:])
+            for sh in shares(vm[cb.norm(rep_code[r["rep"]])])[1:])
 recon = [("Commission column (O) on source sheet", round(o, 2)),
          ("2nd Comm column (P) - sales assistant 0.5%", round(p, 2)),
          ("Shared deals - other reps on the same row", round(extra, 2))]

@@ -111,38 +111,45 @@ def read_rows(path, sheet=None, start_row=2):
         raise CommissionError(f"{path}: sheet '{ws.title}' is empty")
 
     header = all_rows[0]
+    # Some workbooks have a notes column before the rep (rep in B), some don't
+    # (rep in A). Find the layout from where "Q Number" sits and shift every column.
+    names = [str(h or "").strip() for h in header]
+    off = names.index("Q Number") - COL["q_number"] if "Q Number" in names else 0
+    col = {k: v + off for k, v in COL.items()}
+    if min(col.values()) < 0:
+        off, col = 0, dict(COL)
     for key, name in EXPECTED_HEADERS.items():
-        got = header[COL[key]] if len(header) > COL[key] else None
+        got = header[col[key]] if len(header) > col[key] else None
         if str(got or "").strip() != name:
             raise CommissionError(
-                f"Unexpected layout: column {chr(65 + COL[key])} header is {got!r}, expected {name!r}. "
+                f"Unexpected layout: column {chr(65 + col[key])} header is {got!r}, expected {name!r}. "
                 "Has a column been added or moved?")
 
     rows = []
     for excel_row, r in enumerate(all_rows[1:], start=2):
         if excel_row < start_row:
             continue
-        r = list(r) + [None] * (21 - len(r))
-        rate_cell, next_cell = r[COL["rate"]], r[COL["rate"] + 1]
+        r = list(r) + [None] * (22 - len(r))
+        rate_cell, next_cell = r[col["rate"]], r[col["rate"] + 1]
         if (not (isinstance(rate_cell, (int, float)) and rate_cell < 1)
-                and isinstance(next_cell, (int, float)) and 0 < next_cell < 1 and r[10] in (None, "")):
-            r = r[:10] + r[11:]  # row typed one column to the right (blank in K): shift it back
-        rep = str(r[COL["rep"]] or "").strip()
-        commission = r[COL["commission"]]
-        if (not rep or commission in (None, "") or str(r[COL["kind"]] or "").strip() != "Invoice"
+                and isinstance(next_cell, (int, float)) and 0 < next_cell < 1 and r[10 + off] in (None, "")):
+            r = r[:10 + off] + r[11 + off:]  # row typed one column to the right (blank after State): shift it back
+        rep = str(r[col["rep"]] or "").strip()
+        commission = r[col["commission"]]
+        if (not rep or commission in (None, "") or str(r[col["kind"]] or "").strip() != "Invoice"
                 or (isinstance(commission, (int, float)) and abs(commission) < 0.005)):
             continue
-        inv_no = str(r[COL["inv_no"]] or "").strip()
-        stage = str(r[COL["stage"]] or "").strip()
+        inv_no = str(r[col["inv_no"]] or "").strip()
+        stage = str(r[col["stage"]] or "").strip()
         # Built from the invoice # and Final/Deposit rather than read from the Comm Memo column,
         # whose formula is sometimes pointed at the wrong cells (e.g. "46269 Socal Glass ...").
-        doc_number = f"{inv_no} {stage}".strip() or str(r[COL["comm_memo"]] or "").strip()
-        customer = str(r[COL["customer"]] or "").strip()
-        panda_amt = r[COL["panda_amt"]]
-        rate = r[COL["rate"]]
+        doc_number = f"{inv_no} {stage}".strip() or str(r[col["comm_memo"]] or "").strip()
+        customer = str(r[col["customer"]] or "").strip()
+        panda_amt = r[col["panda_amt"]]
+        rate = r[col["rate"]]
         panda_txt = f"{float(panda_amt):g}" if isinstance(panda_amt, (int, float)) else str(panda_amt or "")
         rate_txt = fmt_rate(rate) if isinstance(rate, (int, float)) else str(rate or "")
-        second = r[COL["second"]]
+        second = r[col["second"]]
         second_rate = ""
         if isinstance(second, (int, float)) and second and isinstance(panda_amt, (int, float)) and panda_amt:
             second_rate = fmt_rate(round(second / panda_amt, 5))
@@ -151,12 +158,12 @@ def read_rows(path, sheet=None, start_row=2):
             "rep": rep,
             "customer": customer,
             "doc_number": doc_number,
-            "pay_date": as_date(r[COL["pay_date"]]),
+            "pay_date": as_date(r[col["pay_date"]]),
             "amount": money(commission),
             "second": money(second) if isinstance(second, (int, float)) and second else None,
             "second_description": f"{doc_number} {customer} P#$ {panda_txt} {second_rate}".strip(),
             "description": f"{doc_number} {customer} P#$ {panda_txt} {rate_txt}".strip(),
-            "q_number": str(r[COL["q_number"]] or "").strip(),
+            "q_number": str(r[col["q_number"]] or "").strip(),
             "panda": float(panda_amt) if isinstance(panda_amt, (int, float)) else None,
             "rate": float(rate) if isinstance(rate, (int, float)) else None,
         })
@@ -182,6 +189,31 @@ SECOND_COMM_BY_INVOICE_KEY = "2nd Comm by invoice"  # {"17589": "MACAPINLAC CECI
 
 
 SECOND_COMM_KEY = "2nd Comm"  # commission_vendors.json key for who is paid the "2nd Comm" column
+SECOND_COMM_BY_NAME_KEY = "2nd Comm by name"  # {"Ann": "PUTNAM ANN MARIE", "Cecil": "MACAPINLAC CECILE"}
+
+
+def split_rep(code, vendor_map):
+    """(rep code, 2nd Comm vendor name or None) for a column-B code.
+
+    "Stefan Cecil" / "Derrick Anne": the rep, then the sales assistant who gets
+    the 2nd Comm column. A code that is itself in the map (e.g. "Tyler Greg")
+    is left alone."""
+    code = str(code or "").strip()
+    if norm(code) in vendor_map:
+        return code, None
+    words = code.split()
+    by_name = {norm(k): v for k, v in (vendor_map.get(norm(SECOND_COMM_BY_NAME_KEY)) or {}).items()}
+    if len(words) > 1 and norm(words[-1]) in by_name:
+        return " ".join(words[:-1]), by_name[norm(words[-1])]
+    return code, None
+
+
+def second_comm_vendor_name(row, vendor_map):
+    """Who is paid a row's 2nd Comm: per-invoice override, else the assistant named
+    in the rep code ("Stefan Cecil"), else the "2nd Comm" default."""
+    inv = row["doc_number"].split()[0]
+    override = (vendor_map.get(norm(SECOND_COMM_BY_INVOICE_KEY)) or {}).get(inv)
+    return override or split_rep(row["rep"], vendor_map)[1] or vendor_map.get(norm(SECOND_COMM_KEY))
 
 
 class Lookups:
@@ -313,7 +345,7 @@ def plan_bills(rows, lk, due_date, account, klass, q_field=None):
         raise CommissionError(f"'{SECOND_COMM_KEY}' vendor '{second_name}' not found in QuickBooks")
     for r in rows:
         try:
-            payees = lk.payees(r["rep"])
+            payees = lk.payees(split_rep(r["rep"], lk.vendor_map)[0])
         except LookupError as e:
             problems.append((r, str(e)))
             continue
@@ -332,7 +364,8 @@ def plan_bills(rows, lk, due_date, account, klass, q_field=None):
                   else r["description"].rsplit(" ", 1)[0] + " " + fmt_rate(r["rate"] * float(share)))
                  for vendor, share, how in payees]
         inv = r["doc_number"].split()[0]
-        override = (lk.vendor_map.get(norm(SECOND_COMM_BY_INVOICE_KEY)) or {}).get(inv)
+        override = second_comm_vendor_name(r, lk.vendor_map)
+        override = override if override != second_name else None
         row_second_vendor = lk.vendor_by_display(override) if override else second_vendor
         if override and not row_second_vendor:
             problems.append((r, f"2nd Comm vendor '{override}' for {inv} not found in QuickBooks"))
