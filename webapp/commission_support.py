@@ -14,8 +14,10 @@ Check:
   * a sheet row with no page    -> MISSING SUPPORT;
   * an invoice-like number on a page that is not on the sheet
                                 -> possibly a commission missing from the sheet;
-  * a page with no invoice number is treated as a continuation of the page
-    before it, and flagged so someone glances at it.
+  * every page for an invoice is kept with it: the receipt and any second
+    page (Panda Number Report, quote, crating sheet). A page with no invoice
+    number goes to the job whose Q# it shows, else to the page before it,
+    and is flagged so someone glances at it.
 Each invoice's pages are saved as "Commission support <invoice>.pdf" in the
 output folder (default: next to the scan).
 
@@ -101,52 +103,116 @@ def q_base(q):
     return re.split(r"[/.\s-]", str(q or "").strip())[0]
 
 
+PAGE_KINDS = [
+    ("Receipt", re.compile(r"\bReceipt\b.*Reference\s*No|Received\s*From", re.I | re.S)),
+    ("Panda Number Report", re.compile(r"PANDA\s*NUMBER\s*REPORT", re.I)),
+    ("Sales Order", re.compile(r"SALES\s*ORDER", re.I)),
+    ("Crate & freight sheet", re.compile(r"CRATE\s*&?\s*FREIGHT|Crate\s*Total", re.I)),
+    ("Quote", re.compile(r"\bQuote\s*(Number|Date|#)", re.I)),
+    ("Invoice", re.compile(r"\bInvoice\b", re.I)),
+]
+
+
+def page_kind(text):
+    """What a support page is: Receipt, Panda Number Report, Sales Order, Crate & freight sheet, Quote, Invoice, Other."""
+    for name, rx in PAGE_KINDS:
+        if rx.search(text or ""):
+            return name
+    return "Other" if (text or "").strip() else "Blank / unreadable"
+
+
+def _page_q(text, qmap):
+    """The job's Q# on a page: the receipt's Reference No, else the first known Q# on it
+    (a Panda Number Report's "Project Name: Q#90271", a crating sheet's project #)."""
+    ref = RECEIPT_REF.search(text)
+    if ref and q_base(ref.group(1)) in qmap:
+        return q_base(ref.group(1))
+    return next((t for t in re.findall(r"\d{5,}", text) if t in qmap), None)
+
+
 def match_pages(pages, invoices, q_numbers=None):
     """Assign pages to invoice numbers.
 
-    q_numbers maps a job's Q# to its invoice number(s); a page with no invoice
-    number but a sheet Q# (crating sheet, Panda Number Report) goes to that job.
+    Each invoice's support is every page for it: the receipt, plus any second
+    page such as the Panda Number Report, quote or crating sheet. A page with
+    no invoice number goes to the job whose Q# it shows (the sheet's Q#, or the
+    Reference No on that job's receipt), else to the page before it. Pages for
+    an invoice that isn't on the sheet are grouped the same way, under extra.
+    q_numbers maps a job's Q# to its invoice number(s).
     Returns (groups {invoice: [page_no]}, notes [str], extra {number: [page_no]})."""
     inv_set = set(invoices)
-    qmap = {q_base(k): v for k, v in (q_numbers or {}).items() if q_base(k)}
+    qmap = {q_base(k): list(v) for k, v in (q_numbers or {}).items() if q_base(k)}
     nums = [int(n) for n in invoices if n.isdigit()]
     lo, hi = (min(nums) - NEAR_RANGE, max(nums) + NEAR_RANGE) if nums else (0, -1)
     groups = {n: [] for n in invoices}
     extra, notes = {}, []
+    texts = [(page_no, text or "", how) for page_no, text, how in pages]
+
+    # Learn each receipt's Reference No (the job's Q#) first, so a quote or
+    # Panda Number Report is matched even when it comes before its receipt or
+    # its job isn't on the sheet.
+    for page_no, text, how in texts:
+        ref = RECEIPT_REF.search(text)
+        if not ref:
+            continue
+        tokens = set(NUMBER.findall(text))
+        on_page = sorted(t for t in tokens if t in inv_set) or sorted(
+            t for t in tokens if lo <= int(t) <= hi and t != q_base(ref.group(1)))
+        for n in on_page:
+            lst = qmap.setdefault(q_base(ref.group(1)), [])
+            if n not in lst:
+                lst.append(n)
+
+    def add(n, page_no):
+        target = groups[n] if n in groups else extra.setdefault(n, [])
+        if page_no not in target:
+            target.append(page_no)
+
     last = None
-    for page_no, text, how in pages:
+    for page_no, text, how in texts:
         tokens = set(NUMBER.findall(text))
         found = sorted(t for t in tokens if t in inv_set)
         near = sorted(t for t in tokens if t not in inv_set and lo <= int(t) <= hi and t not in qmap)
         by_q = []
-        if not found:
-            # The first Q# on the page is the header's; later ones are usually references.
-            q = next((t for t in re.findall(r"\d{5,}", text) if t in qmap), None)
+        if not found and not near:
+            q = _page_q(text, qmap)
             if q:
                 cands = qmap[q]
                 by_q = [c for c in cands if last and c in last] or cands[:1]
-        for t in near:
-            extra.setdefault(t, []).append(page_no)
         if found:
             for n in found:
-                groups[n].append(page_no)
+                add(n, page_no)
+            for t in near:            # another invoice # on the same page: report it too
+                add(t, page_no)
             last = found
+        elif near:                    # a page for an invoice that isn't on the sheet
+            for t in near:
+                add(t, page_no)
+            last = near
         elif by_q:
             for n in by_q:
-                groups[n].append(page_no)
-            notes.append(f"page {page_no}: no invoice #, matched by Q# to {', '.join(by_q)}")
+                add(n, page_no)
+            notes.append(f"page {page_no} ({page_kind(text)}): no invoice #, matched by Q# to {', '.join(by_q)}")
             last = by_q
-        elif near:                    # a page for an invoice that isn't on the sheet
-            last = None
         elif not text.strip():
             notes.append(f"page {page_no}: no readable text ({how}) -- check it by eye")
         elif last:
             for n in last:
-                groups[n].append(page_no)
-            notes.append(f"page {page_no}: no invoice # found, kept with {', '.join(last)} (page before)")
+                add(n, page_no)
+            notes.append(f"page {page_no} ({page_kind(text)}): no invoice # found, kept with "
+                         f"{', '.join(last)} (page before)")
         else:
-            notes.append(f"page {page_no}: no invoice # found and nothing before it -- not attached")
+            notes.append(f"page {page_no} ({page_kind(text)}): no invoice # found and nothing before it -- not attached")
+    for g in list(groups.values()) + list(extra.values()):
+        g.sort()
+    extra = {n: p for n, p in extra.items() if p}
     return groups, notes, extra
+
+
+def describe_pages(page_nos, pages):
+    """'p. 37 Receipt, p. 20 Panda Number Report' for a group of pages."""
+    kind = {n: page_kind(t) for n, t, _ in pages}
+    return ", ".join(f"p. {n} {kind.get(n, '')}".strip() for n in page_nos)
 
 
 def q_numbers_for(rows):
@@ -248,13 +314,19 @@ def support_filename(invoice):
     return f"Commission support {invoice}.pdf"
 
 
-def attach_support(files, rows, due_date):
-    """Attach each invoice's PDF to its bills that are due on due_date.
+def attach_support(files, rows, due_date, extra=()):
+    """Attach each invoice's PDF (all its pages) to its bills that are due on due_date.
 
+    extra: invoice numbers found in the scan but not on the sheet; their pages go
+    to any "<invoice> Final"/"<invoice> Deposit" bill due that day (e.g. a late
+    Final posted separately).
     Returns {"attached": [(bill id, bill #, vendor, file)], "skipped": n,
              "no_file": [bill #], "not_posted": [bill #], "found": n}."""
-    docs = sorted({r["doc_number"] for r in rows})
-    inv_of_doc = {r["doc_number"]: r["doc_number"].split()[0] for r in rows}
+    sheet_docs = sorted({r["doc_number"] for r in rows})
+    extra_docs = [f"{n} {kind}" for n in sorted(extra) for kind in ("Final", "Deposit")
+                  if f"{n} {kind}" not in sheet_docs]
+    docs = sheet_docs + extra_docs
+    inv_of_doc = {d: d.split()[0] for d in docs}
     bills = []
     for i in range(0, len(docs), 50):
         in_list = ", ".join("'" + d.replace("'", "\\'") + "'" for d in docs[i:i + 50])
@@ -276,12 +348,12 @@ def attach_support(files, rows, due_date):
         out["attached"].append((b["Id"], b["DocNumber"], b["VendorRef"].get("name", b["VendorRef"]["value"]), name))
     found_docs = {b["DocNumber"] for b in bills}
     out["no_file"] = sorted(out["no_file"])
-    out["not_posted"] = [d for d in docs if d not in found_docs]
+    out["not_posted"] = [d for d in sheet_docs if d not in found_docs]
     return out
 
 
-def attach(files, rows, due_date):
-    res = attach_support(files, rows, due_date)
+def attach(files, rows, due_date, extra=()):
+    res = attach_support(files, rows, due_date, extra)
     for bill_id, doc, vendor, name in res["attached"]:
         print(f"  attached {name} -> bill {bill_id} ({doc} / {vendor})")
     print(f"\nAttached {len(res['attached'])}, already attached {res['skipped']}, "
@@ -337,14 +409,19 @@ def main():
     if not (missing or extra or notes):
         print("Every invoice on the sheet has support, and nothing extra was found.")
 
+    print("\nSupport by invoice:")
+    for n, p in sorted({**groups, **extra}.items()):
+        if p:
+            print(f"  {n}: {describe_pages(p, pages)}")
+
     out_dir = args.out or os.path.join(os.path.dirname(os.path.abspath(args.scan)), "commission_support")
-    files = split_pdf(args.scan, groups, out_dir)
+    files = split_pdf(args.scan, {**groups, **extra}, out_dir)
     print(f"\nWrote {len(files)} per-invoice PDF(s) to {out_dir}")
 
     if args.attach:
         if not due_date:
             raise SystemExit("Couldn't tell the payroll date -- pass --due-date MM/DD/YYYY")
-        attach(files, rows, due_date)
+        attach(files, rows, due_date, extra)
     return 1 if (missing or extra) else 0
 
 
